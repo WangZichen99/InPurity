@@ -1,5 +1,5 @@
 # InPurity
-The Chinese version of this document is available [here](readme-zh.md).
+The Chinese version of this document is available [here](README.zh.md).
 
 InPurity is a Windows service application to block porn pictures and videos. It consists of a main service and a guardian service that stops your computer from displaying pornographic images and videos, freeing your brain from the dopamine trap and returning you to real life. After a period of “cleansing”, you'll be able to find the purity of your heart and feel the beauty of life.
 
