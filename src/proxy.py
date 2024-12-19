@@ -1,5 +1,5 @@
 from mitmproxy import http
-from PIL import Image, ImageSequence, ImageFilter
+from PIL import Image, ImageSequence, ImageFilter, UnidentifiedImageError
 import io
 import logging
 import os
@@ -10,9 +10,7 @@ from logging.handlers import TimedRotatingFileHandler
 from threading import Timer
 import hashlib
 from db_manager import DatabaseManager
-from constants import LOG_PATH
-# import re
-# import tldextract
+from constants import LOG_PATH, VIDEO_SIGN
 
 class InPurityProxy:
     def __init__(self):
@@ -79,78 +77,51 @@ class InPurityProxy:
         host = authority if authority else flow.request.host
         if self.is_blacklisted(host):
             flow.kill()
-            # 如果 host 在黑名单中，返回 403
-            # flow.response = http.Response.make(
-            #     403,  # 返回403状态码
-            #     b"Forbidden: Blacklisted site",  # 响应体
-            #     {"Content-Type": "text/plain"}  # 响应头
-            # )
             self.logger.info(f"拦截黑名单网站请求: {host}")
+
+    def check_stream_video(self, content_type, content_bytes):
+        if 'octet-stream' in content_type:
+            for signature, format_name in VIDEO_SIGN.items():
+                if content_bytes.startswith(signature):
+                    print(f"Detected video format: {format_name}")
+                    return True
+        return False
 
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.response.status_code == 200:
             content_type = flow.response.headers.get("Content-Type", "")
-            # if "text/html" in content_type:
-            #     # 使用正则表达式提取charset
-            #     match = re.search(r'charset=([^\s;]+)', content_type, re.IGNORECASE)
-            #     if match:
-            #         charset = match.group(1)
-            #     else:
-            #         charset = "utf-8"
-            #     is_removed, predict_text = ai_detect.predict_text(flow.response.content)
-            #     flow.response.content = predict_text.encode(charset)
-            #     if is_removed:
-            #         self.logger.info(f'文本修改url{flow.request.url}')
             if "image" in content_type:
                 # 获取 authority，如果没有则使用 Host
                 authority = flow.request.headers.get(":authority", None)
                 host = authority if authority else flow.request.host
-                
                 # 初始化该网站的统计信息（如果之前未记录）
                 if host not in self.site_stats:
                     self.site_stats[host] = {"total_images": 0, "problematic_images": 0}
-                
                 # 统计该网站的图片总数
                 self.site_stats[host]["total_images"] += 1
-                predict_result = ai_detect.predict_image(img = Image.open(BytesIO(flow.response.content)))
-                if predict_result:
-                    flow.response.status_code = 403
-                    flow.response.content = b"Forbidden"
-                    self.logger.info(f'图片拦截url：{flow.request.url}')
-                    self.site_stats[host]["problematic_images"] += 1  # 统计有问题的图片
-                # 打印当前图片的检测结果
-                # total_images = site_stats[host]["total_images"]
-                # problematic_images = site_stats[host]["problematic_images"]
-                # print(f"Site: {host} | Total images: {total_images}, Problematic images: {problematic_images}")
-                
+                try:
+                    predict_result = ai_detect.predict_image(img = Image.open(BytesIO(flow.response.content)))
+                    if predict_result:
+                        flow.response.status_code = 403
+                        flow.response.content = b"Forbidden"
+                        self.logger.info(f'图片拦截url：{flow.request.url}')
+                        self.site_stats[host]["problematic_images"] += 1  # 统计有问题的图片
+                except UnidentifiedImageError:
+                    self.logger.error(f"无法识别的图像文件: {flow.request.url}")
+                except Exception as e:
+                    self.logger.error(f"处理图像时发生错误: {e}")
                 # 重置计时器，每次处理完图片请求后启动计时器
                 self.reset_timer(host)
-            elif "video" in content_type:
-                if "mp4" in content_type:
-                    keyframes = stream_parse.extract_keyframes_from_mp4(flow.response.content)
-                    for keyframe in keyframes:
-                        predict_result = ai_detect.predict_image(img = keyframe)
-                        if predict_result:
-                            flow.response.status_code = 403
-                            flow.response.content = b"Forbidden"
-                            self.logger.info(f'mp4拦截url：{flow.request.url}')
-                            break
-                else:
-                    keyframes = stream_parse.parse_stream_with_pyav(flow.response.content)
-                    for keyframe in keyframes:
-                        predict_result = ai_detect.predict_image(img = keyframe)
-                        if predict_result:
-                            flow.response.status_code = 403
-                            flow.response.content = b"Forbidden"
-                            self.logger.info(f'视频拦截url：{flow.request.url}')
-                            break
-            # elif "audio" in content_type:
-            #     return
-            # elif "application/octet-stream" in content_type:
-            #     # 调用ffmpeg处理文件流
-            #     return
-            # else:
-            #     return
+            elif "video" in content_type or self.check_stream_video(content_type, flow.response.content):
+                self.logger.info(f'视频文件：{flow.request.url}')
+                keyframes = stream_parse.parse_stream_with_pyav(flow.response.content)
+                for keyframe in keyframes:
+                    predict_result = ai_detect.predict_image(img = keyframe)
+                    if predict_result:
+                        flow.response.status_code = 403
+                        flow.response.content = b"Forbidden"
+                        self.logger.info(f'视频拦截url：{flow.request.url}')
+                        break
         
     def print_final_stats(self, host):
         """
@@ -170,8 +141,6 @@ class InPurityProxy:
                 host_md5 = self.md5_hash(host)
                 self.db_manager.execute_query("INSERT OR IGNORE INTO black_site (host) VALUES (?)", (host_md5,))
                 self.logger.info(f"域名 {host} 已加入黑名单.\n")
-        # else:
-            # self.logger.info(f"\n=== No images detected for {host} ===\n")
 
     def reset_timer(self, host):
         """

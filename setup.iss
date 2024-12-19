@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "InPurity"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "purity"
 
 [Setup]
@@ -33,14 +33,12 @@ Source: "D:\Workspace\Python\antiproxy\dist\daemon_service\*"; DestDir: "{app}\d
 Source: "D:\Workspace\Python\antiproxy\dist\run_mitmdump\*"; DestDir: "{app}\run_mitmdump"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\dist\install_script\*"; DestDir: "{app}\install_script"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\dist\proxy_config\*"; DestDir: "{app}\proxy_config"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\Workspace\Python\antiproxy\certificates\mitmproxy-ca-cert.cer"; DestDir: "C:\Windows\System32\config\systemprofile\.mitmproxy"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "D:\Workspace\Python\antiproxy\certificates\mitmproxy-ca-cert.cer"; DestDir: "C:\Windows\System32\config\systemprofile\.mitmproxy"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\model\mobilenet_v2.onnx"; DestDir: "{app}\model"; Flags: ignoreversion recursesubdirs createallsubdirs
-;Source: "D:\Workspace\Python\antiproxy\purity.db"; DestDir: "{app}"; Flags: onlyifdoesntexist
-
 
 [Run]
 ; 安装证书脚本
-Filename: "{app}\install_script\install_script.exe"; Description: "Installing MITM Certificate"; Flags: runhidden waituntilterminated
+Filename: "{app}\install_script\install_script.exe"; Description: "Installing MITM Certificate"; Flags: runhidden waituntilterminated;
 ; 启动配置代理脚本，用户自定义配置
 ;Filename: "{app}\proxy_config\proxy_config.exe"; Description: "Configure Proxy Settings"; Flags: waituntilterminated postinstall
 ; 注册并启动 Windows 主服务
@@ -58,7 +56,9 @@ Filename: "{sys}\sc.exe"; Parameters: "stop InPurityDaemonService"; RunOnceId: "
 Filename: "{sys}\sc.exe"; Parameters: "delete InPurityDaemonService"; RunOnceId: "deletedaemon"; Flags: runhidden shellexec waituntilterminated
 
 [UninstallDelete]
-;Type: files; Name: "{app}\purity.db"
-;Type: files; Name: "{app}\certificates\*"
-Type: files; Name: "{app}\*"
+Type: dirs; Name: "{app}\main_service"
+Type: dirs; Name: "{app}\daemon_service"
+Type: dirs; Name: "{app}\run_mitmdump"
+Type: dirs; Name: "{app}\install_script"
+Type: dirs; Name: "{app}\proxy_config"
 

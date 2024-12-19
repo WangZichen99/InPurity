@@ -46,3 +46,11 @@ IMAGE_LABELS = ['drawings', 'hentai', 'neutral', 'porn', 'sexy']
 IMAGE_THRESHOLD = 0.3
 
 TEST_DIR = os.path.join(BASE_DIR, 'test')
+
+VIDEO_SIGN = {
+        b'\x00\x00\x00\x18ftyp': 'mp4',  # MP4
+        b'\x1A\x45\xDF\xA3': 'mkv',      # MKV/WebM
+        b'\x47': 'ts',                   # TS
+        b'RIFF': 'avi',                  # AVI
+        b'FLV': 'flv',                   # FLV
+    }

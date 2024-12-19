@@ -48,7 +48,8 @@ class DatabaseManager:
                 ('upstream_enable', '0', '0'),
                 ('socket_port', '51001', '0'),
                 ('connection_strategy', 'lazy', '1'),
-                ('block_global', 'false', '1')
+                ('block_global', 'false', '1'),
+                ('stream_large_bodies', '1m', '1')
             ''')
 
             connection.commit()

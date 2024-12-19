@@ -9,27 +9,7 @@ import av
 # from keyframe_extract import extract_keyframes
 import io
 
-'''
-def convert_m4s_to_mp4(m4s_file, output_file):
-    """
-    使用打包的 FFmpeg 将 .m4s 文件转换为 .mp4 文件。
-    """
-    # 构建 FFmpeg 命令
-    command = [
-        FFMPEG_PATH,  # 使用 constants.py 中定义的路径常量
-        '-i', m4s_file,  # 输入文件
-        '-c', 'copy',    # 直接复制流，不进行重新编码
-        output_file      # 输出文件
-    ]
-
-    # 执行命令并等待其完成
-    try:
-        subprocess.run(command, check=True)
-        print(f"Conversion completed successfully: {output_file}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error during conversion: {e}")
-'''
-
+"""
 def extract_keyframes_from_mp4(mp4_data):
     container = av.open(io.BytesIO(mp4_data))
     keyframes = []
@@ -46,8 +26,7 @@ def extract_keyframes_from_mp4(mp4_data):
 
 def parse_stream_with_pyav(stream_data):
     keyframes = []
-    stream = io.BytesIO(stream_data)
-    container = av.open(stream)
+    container = av.open(io.BytesIO(stream_data))
 
     for frame in container.decode(video=0):
         if frame.key_frame:
@@ -55,22 +34,50 @@ def parse_stream_with_pyav(stream_data):
 
     container.close()
     return keyframes
+"""
+
+def parse_stream_with_pyav(stream_data, max_frames=300):
+    keyframes = []
+    try:
+        container = av.open(io.BytesIO(stream_data))
+        stream = container.streams.video[0]  # 获取视频流
+        stream.codec_context.skip_frame = "NONKEY"  # 跳过非关键帧
+        # 获取视频时基
+        time_base = float(stream.time_base)
+        # 视频时长（秒）
+        video_duration = float(stream.duration) * stream.time_base
+        # 动态调整间隔
+        if video_duration <= 300:  # 小于 5 分钟
+            interval_seconds = 0
+        elif video_duration <= 3600:  # 小于 1 小时
+            interval_seconds = 30
+        else:  # 超过 1 小时
+            interval_seconds = 60
+        # 提取关键帧
+        if interval_seconds == 0:
+            for frame in container.decode(video=0):
+                if frame.key_frame:
+                    keyframes.append(frame.to_image())
+        else:
+            last_saved_time = 0
+            keyframe_count = 0
+            for frame in container.decode(video=0):
+                # 计算当前帧的时间(秒)
+                current_time = frame.pts * time_base
+                # 检查是否达到间隔时间
+                if current_time >= last_saved_time + interval_seconds:
+                    keyframes.append(frame.to_image())
+                    keyframe_count += 1
+                    last_saved_time = current_time
+        print(f"视频时基: {time_base}, 视频时长: {video_duration:.2f}秒, 间隔帧时长：{interval_seconds}, 帧数量：{len(keyframes)}")
+    except Exception as e:
+        print(f"Error extracting keyframes: {e}")
+    finally:
+        if container:
+            container.close()
+        return keyframes
 
 """
-def extract_keyframes_from_m4s(m4s_data):
-    # 使用 av.open 从字节流或文件中打开视频
-    container = av.open(m4s_data)
-    keyframes = []
-
-    # 遍历视频流
-    for frame in container.decode(video=0):
-        # 检查是否为关键帧
-        if frame.is_keyframe:
-            keyframes.append(frame)
-
-    return keyframes
-
-
 def keyframes_show(keyframes):
     frames_num = len(keyframes)
     row_num = frames_num // 3 + 1

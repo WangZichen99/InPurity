@@ -85,7 +85,6 @@ def predict_image(img):
 
     # 进行 ONNX 模型预测
     predictions = session.run([output_name], {input_name: img_array})[0]
-    print("预测结果:", predictions)
 
     # 显示图片
     # plt.figure(figsize=(6, 6))
@@ -102,8 +101,7 @@ def predict_image(img):
     # print(f"预测分数: {scores}")
     # return predictions
 
-    if predictions[0][1] > IMAGE_THRESHOLD or predictions[0][3] > IMAGE_THRESHOLD or predictions[0][4] > IMAGE_THRESHOLD:
-        return 1
-    else:
-        return 0
+    result = predictions[0][1] > IMAGE_THRESHOLD or predictions[0][3] > IMAGE_THRESHOLD or predictions[0][4] > IMAGE_THRESHOLD
+    print(f"预测结果：{predictions}，{result}")
+    return result
 

@@ -76,13 +76,21 @@ class CertificateInstaller:
             if not self.is_admin():
                 self.logger.error("需要管理员权限才能安装证书。")
                 return
+            # 检查证书是否已安装
+            check_result = subprocess.run([
+                "certutil",
+                "-verify",
+                CERTIFICATES_PATH
+            ], check=False, capture_output=True, text=True)
+            if check_result.returncode == 0:
+                self.logger.info("证书已安装，无需重复安装。")
+                return
             # 设置证书控制权限
             self.set_full_control_permissions()
             # 使用 certutil 命令安装证书到受信任的根证书存储区
             subprocess.run([
                 "certutil",
                 "-addstore",
-                # "-f",
                 "root",
                 CERTIFICATES_PATH
             ], check=True)
