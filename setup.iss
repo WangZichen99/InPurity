@@ -56,9 +56,9 @@ Filename: "{sys}\sc.exe"; Parameters: "stop InPurityDaemonService"; RunOnceId: "
 Filename: "{sys}\sc.exe"; Parameters: "delete InPurityDaemonService"; RunOnceId: "deletedaemon"; Flags: runhidden shellexec waituntilterminated
 
 [UninstallDelete]
-Type: dirs; Name: "{app}\main_service"
-Type: dirs; Name: "{app}\daemon_service"
-Type: dirs; Name: "{app}\run_mitmdump"
-Type: dirs; Name: "{app}\install_script"
-Type: dirs; Name: "{app}\proxy_config"
+Type: files; Name: "{app}\main_service\*"
+Type: files; Name: "{app}\daemon_service\*"
+Type: files; Name: "{app}\run_mitmdump\*"
+Type: files; Name: "{app}\install_script\*"
+Type: files; Name: "{app}\proxy_config\*"
 
