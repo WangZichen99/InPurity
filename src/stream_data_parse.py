@@ -1,13 +1,12 @@
+import io
 import av
+# import os
 # import time
 # import subprocess
-# from constants import FFMPEG_PATH  # 从 constants.py 中导入常量
-# import matplotlib.pyplot as plt
 # import numpy as np
-# import os
 # from constants import TEST_DIR
+# import matplotlib.pyplot as plt
 # from keyframe_extract import extract_keyframes
-import io
 
 """
 def extract_keyframes_from_mp4(mp4_data):

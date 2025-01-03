@@ -45,7 +45,12 @@ InPurity
 - **守护服务**：
 将监听主服务状态和Windows代理设置是否变动以防止随意停止服务或关闭代理。
 
-## 参考引用
+## 感谢
+本项目使用了以下开源项目：
+
+- **[mitmproxy](https://github.com/mitmproxy/mitmproxy)**
+  An interactive TLS-capable intercepting HTTP proxy for penetration testers and software developers.
+
 - **[Deep NN for NSFW Detection](https://github.com/GantMan/nsfw_model)**  
   Developed by Gant Laborde. A deep neural network model for detecting NSFW content.
 

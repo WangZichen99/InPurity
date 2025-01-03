@@ -1,17 +1,19 @@
-from mitmproxy import http
-from PIL import Image, ImageSequence, ImageFilter, UnidentifiedImageError
-import io
-import logging
 import os
-import ai_detect
-from io import BytesIO
-import stream_data_parse as stream_parse
-from logging.handlers import TimedRotatingFileHandler
-from threading import Timer
-import hashlib
-from db_manager import DatabaseManager
-from constants import LOG_PATH, VIDEO_SIGN
 import base64
+import hashlib
+import logging
+import ai_detect
+import numpy as np
+from io import BytesIO
+import imageio.v3 as iio
+from mitmproxy import http
+from threading import Timer
+from urllib.parse import urlparse
+from db_manager import DatabaseManager
+import stream_data_parse as stream_parse
+from constants import LOG_PATH, VIDEO_SIGN
+from PIL import Image, UnidentifiedImageError
+from logging.handlers import TimedRotatingFileHandler
 
 class InPurityProxy:
     def __init__(self):
@@ -36,25 +38,6 @@ class InPurityProxy:
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         return logger
-
-    def blur_image(self, image, radius=50):
-        """对图像应用高斯模糊"""
-        return image.filter(ImageFilter.GaussianBlur(radius=radius))
-
-    def process_gif(self, image):
-        """处理 GIF 图像"""
-        frames = [self.blur_image(frame.convert("RGBA")) for frame in ImageSequence.Iterator(image)]
-        img_byte_arr = io.BytesIO()
-        frames[0].save(img_byte_arr, format="GIF", save_all=True, append_images=frames[1:], loop=0)
-        return img_byte_arr.getvalue()
-
-    def process_static_image(self, image):
-        """处理静态图像"""
-        blurred_image = self.blur_image(image)
-        img_byte_arr = io.BytesIO()
-        original_format = image.format or "PNG"
-        blurred_image.save(img_byte_arr, format=original_format)
-        return img_byte_arr.getvalue()
     
     def md5_hash(self, text):
         """
@@ -69,16 +52,6 @@ class InPurityProxy:
         host_md5 = self.md5_hash(host)
         result = self.db_manager.fetchone("SELECT 1 FROM black_site WHERE host = ?", (host_md5,)) is not None
         return result
-    
-    def request(self, flow: http.HTTPFlow) -> None:
-        """
-        在请求阶段检查 host 是否在黑名单中
-        """
-        authority = flow.request.headers.get(":authority", None)
-        host = authority if authority else flow.request.host
-        if self.is_blacklisted(host):
-            flow.kill()
-            self.logger.info(f"拦截黑名单网站请求: {host}")
 
     def check_stream_video(self, content_type, content_bytes):
         if 'octet-stream' in content_type:
@@ -87,13 +60,35 @@ class InPurityProxy:
                     print(f"Detected video format: {format_name}")
                     return True
         return False
+    
+    def request(self, flow: http.HTTPFlow) -> None:
+        """
+        在请求阶段检查 host 是否在黑名单中
+        """
+        # 检查 URL 是否在黑名单中
+        parsed_url = urlparse(flow.request.url)
+        # 获取主域名部分
+        main_domain = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+        if self.is_blacklisted(main_domain):
+            flow.kill()
+            self.logger.info(f"拦截黑名单 URL 请求: {flow.request.url}")
 
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.response.status_code == 200:
             content_type = flow.response.headers.get("Content-Type", "")
+            # 如果无法获取 Content-Type，则尝试获取 sec-fetch-dest
+            if "image" not in content_type:
+                sec_fetch_dest = flow.request.headers.get("sec-fetch-dest", "")
+                if sec_fetch_dest == "image":
+                    content_type = "image/unknown"
+            # 如果 sec-fetch-dest 也无法判断，则根据 URL 后缀判断
+            if "image" not in content_type:
+                image_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.avif')
+                if flow.request.url.lower().endswith(image_extensions):
+                    content_type = "image/unknown"
             if "image" in content_type:
                 # 首先检查图片是否为 SVG 格式
-                if "svg" in content_type:
+                if "svg" in content_type or "icon" in content_type:
                     self.logger.info(f"SVG 图像跳过处理: {flow.request.url}")
                     return
                 referer = flow.request.headers.get("Referer", None)
@@ -114,33 +109,42 @@ class InPurityProxy:
                         image_data = base64.b64decode(base64_data)
                     else:
                         image_data = flow.response.content
-                    
-                    predict_result = ai_detect.predict_image(img=Image.open(BytesIO(image_data)))
+
+                    # 判断是否为 AVIF 格式
+                    if "avif" in content_type or flow.request.url.lower().endswith('.avif'):
+                        avifimg = iio.imread(image_data)
+                        if avifimg.ndim == 4:
+                            avifimg = np.squeeze(avifimg)
+                        img = Image.fromarray(avifimg)
+                    else:
+                        img = Image.open(BytesIO(image_data))
+                    predict_result = ai_detect.predict_image(img=img)
                     if predict_result:
                         flow.response.status_code = 403
                         flow.response.content = b"Forbidden"
                         self.logger.info(f'图片拦截url：{flow.request.url}')
                         # self.site_stats[host]["problematic_images"] += 1  # 统计有问题的图片
-                        if referer:
+                        if referer and predict_result != "No Module File":
                             self.site_stats[referer]["problematic_images"] += 1
                 except UnidentifiedImageError:
                     self.logger.error(f"无法识别的图像文件: {flow.request.url}")
+                    # self.logger.error("Traceback: %s", traceback.format_exc())
                 except Exception as e:
                     self.logger.error(f"处理图像时发生错误: {e}")
                 
                 # 重置计时器，每次处理完图片请求后启动计时器
                 if referer:
                     self.reset_timer(referer)
-            elif "video" in content_type or self.check_stream_video(content_type, flow.response.content):
-                self.logger.info(f'视频文件：{flow.request.url}')
-                keyframes = stream_parse.parse_stream_with_pyav(flow.response.content)
-                for keyframe in keyframes:
-                    predict_result = ai_detect.predict_image(img=keyframe)
-                    if predict_result:
-                        flow.response.status_code = 403
-                        flow.response.content = b"Forbidden"
-                        self.logger.info(f'视频拦截url：{flow.request.url}')
-                        break
+            # elif "video" in content_type or self.check_stream_video(content_type, flow.response.content):
+            #     self.logger.info(f'视频文件：{flow.request.url}')
+            #     keyframes = stream_parse.parse_stream_with_pyav(flow.response.content)
+            #     for keyframe in keyframes:
+            #         predict_result = ai_detect.predict_image(img=keyframe)
+            #         if predict_result:
+            #             flow.response.status_code = 403
+            #             flow.response.content = b"Forbidden"
+            #             self.logger.info(f'视频拦截url：{flow.request.url}')
+            #             break
 
     def print_final_stats(self, host):
         """

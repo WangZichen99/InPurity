@@ -5,10 +5,10 @@ import numpy as np
 # from io import BytesIO
 import onnxruntime as ort
 # from bs4 import BeautifulSoup
+# import matplotlib.pyplot as plt
 # from transformers import AutoTokenizer
 # from constants import TOKENIZER_DIR, TEXT_MODEL_FILE
 from constants import IMAGE_MODEL_FILE, IMAGE_LABELS, IMAGE_THRESHOLD
-# import matplotlib.pyplot as plt
 
 """
 tokenizer = AutoTokenizer.from_pretrained(TOKENIZER_DIR, clean_up_tokenization_spaces=True)
@@ -62,46 +62,53 @@ def predict_text(text, min_length=10):
 """
 
 def predict_image(img):
-    # 下载网络图片
-    # response = requests.get(image_url)
-    # img = Image.open(BytesIO(content))
+    try:
+        # 下载网络图片
+        # response = requests.get(image_url)
+        # img = Image.open(BytesIO(content))
+        # 调整图像大小并预处理
+        img = img.resize((224, 224))  # 调整图像尺寸为 224x224
+        img_array = np.array(img)  # 转换为数组
+        # 如果图像不是 RGB 格式，则将其转换为 RGB
+        if img_array.shape[-1] != 3:
+            img = img.convert('RGB')
+            img_array = np.array(img)
+        img_array = img_array.astype(np.float32) / 255.0  # 归一化
+        img_array = np.expand_dims(img_array, axis=0)  # 增加批量维度
 
-    # 调整图像大小并预处理
-    img = img.resize((224, 224))  # 调整图像尺寸为 224x224
-    img_array = np.array(img)  # 转换为数组
-    # 如果图像不是 RGB 格式，则将其转换为 RGB
-    if img_array.shape[-1] != 3:
-        img = img.convert('RGB')
-        img_array = np.array(img)
-    img_array = img_array.astype(np.float32) / 255.0  # 归一化
-    img_array = np.expand_dims(img_array, axis=0)  # 增加批量维度
+        # 加载 ONNX 模型
+        session = ort.InferenceSession(IMAGE_MODEL_FILE)
 
-    # 加载 ONNX 模型
-    session = ort.InferenceSession(IMAGE_MODEL_FILE)
+        # 获取模型输入输出的名字
+        input_name = session.get_inputs()[0].name
+        output_name = session.get_outputs()[0].name
 
-    # 获取模型输入输出的名字
-    input_name = session.get_inputs()[0].name
-    output_name = session.get_outputs()[0].name
+        # 进行 ONNX 模型预测
+        predictions = session.run([output_name], {input_name: img_array})[0]
 
-    # 进行 ONNX 模型预测
-    predictions = session.run([output_name], {input_name: img_array})[0]
+        # 显示图片
+        # plt.figure(figsize=(6, 6))
+        # plt.imshow(img)
+        # plt.axis('off')
+        # plt.title('输入图片')
+        # plt.show()
 
-    # 显示图片
-    # plt.figure(figsize=(6, 6))
-    # plt.imshow(img)
-    # plt.axis('off')
-    # plt.title('输入图片')
-    # plt.show()
+        # 获取分数最大值的索引
+        # max_index = np.argmax(predictions, axis=1)[0]  # axis=1 表示按行取最大值
+        # label = IMAGE_LABELS[max_index]  # 根据索引找到对应的标签
+        # scores = predictions[0][max_index]
+        # print(f"预测标签: {label}")
+        # print(f"预测分数: {scores}")
+        # return predictions
 
-    # 获取分数最大值的索引
-    # max_index = np.argmax(predictions, axis=1)[0]  # axis=1 表示按行取最大值
-    # label = IMAGE_LABELS[max_index]  # 根据索引找到对应的标签
-    # scores = predictions[0][max_index]
-    # print(f"预测标签: {label}")
-    # print(f"预测分数: {scores}")
-    # return predictions
-
-    result = predictions[0][1] > IMAGE_THRESHOLD or predictions[0][3] > IMAGE_THRESHOLD or predictions[0][4] > IMAGE_THRESHOLD
-    print(f"预测结果：{predictions}，{result}")
-    return result
+        result = predictions[0][1] > IMAGE_THRESHOLD or predictions[0][3] > IMAGE_THRESHOLD or predictions[0][4] > IMAGE_THRESHOLD
+        print(f"预测结果：{predictions}，{result}")
+        return result
+    except Exception as e:
+        error_msg = str(e)
+        # 如果是模型文件不存在的错误，返回 True
+        if "NO_SUCHFILE" in error_msg and "File doesn't exist" in error_msg:
+            return "No Module File"
+        print(f"ONNX运行时错误: {error_msg}")
+        return False
 

@@ -1,19 +1,19 @@
-import win32serviceutil
-import win32service
-import win32event
-import servicemanager
-import winreg
-import logging
-from logging.handlers import TimedRotatingFileHandler
-import traceback
 import os
 import sys
 import time
+import winreg
+import logging
+import traceback
 import threading
+import win32event
+import win32service
+import servicemanager
+import win32serviceutil
 from filelock import FileLock
-from constants import MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, LOG_PATH, INTERNET_SUB_KEY, SERVICE_SUB_KEY
 from db_manager import DatabaseManager
 from registry_monitor import RegistryMonitor
+from logging.handlers import TimedRotatingFileHandler
+from constants import MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, LOG_PATH, INTERNET_SUB_KEY, SERVICE_SUB_KEY
 
 class DaemonService(win32serviceutil.ServiceFramework):
     _svc_name_ = DAEMON_SERVICE_NAME
@@ -195,10 +195,6 @@ class DaemonService(win32serviceutil.ServiceFramework):
                             self.logger.error("Traceback: %s", traceback.format_exc())
 
 if __name__ == '__main__':
-    # venv_path = "D:\\Workspace\\Python\\antiproxy\\.venv\\Lib\\site-packages"
-    # sys.path.insert(0, venv_path)
-    # import servicemanager
-
     if len(sys.argv) == 1:
         servicemanager.Initialize()
         servicemanager.PrepareToHostSingle(DaemonService)

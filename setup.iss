@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "InPurity"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "purity"
 
 [Setup]
@@ -23,6 +23,7 @@ OutputBaseFilename=InPuritySetup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+;Uninstallable=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -33,27 +34,51 @@ Source: "D:\Workspace\Python\antiproxy\dist\daemon_service\*"; DestDir: "{app}\d
 Source: "D:\Workspace\Python\antiproxy\dist\run_mitmdump\*"; DestDir: "{app}\run_mitmdump"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\dist\install_script\*"; DestDir: "{app}\install_script"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\dist\proxy_config\*"; DestDir: "{app}\proxy_config"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "D:\Workspace\Python\antiproxy\certificates\mitmproxy-ca-cert.cer"; DestDir: "C:\Windows\System32\config\systemprofile\.mitmproxy"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
-Source: "D:\Workspace\Python\antiproxy\model\mobilenet_v2.onnx"; DestDir: "{app}\model"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "D:\Workspace\Python\antiproxy\certificates\mitmproxy-ca-cert.cer"; DestDir: "C:\Windows\System32\config\systemprofile\.mitmproxy"; Flags: onlyifdoesntexist recursesubdirs
+Source: "D:\Workspace\Python\antiproxy\model\mobilenet_v2.onnx"; DestDir: "{app}\model"; Flags: ignoreversion recursesubdirs
+
+[Code]
+procedure StopAndDeleteService(ServiceName: string);
+var
+  ResultCode: Integer;
+begin
+  // 停止服务
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop ' + ServiceName, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  
+  // 删除服务
+  Exec(ExpandConstant('{sys}\sc.exe'), 'delete ' + ServiceName, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  // 停止并删除服务 InPurityDaemonService
+  StopAndDeleteService('InPurityDaemonService');
+  
+  // 停止并删除服务 InPurityService
+  StopAndDeleteService('InPurityService');
+  
+  // 返回 True 以继续安装
+  Result := True;
+end;
 
 [Run]
-; 安装证书脚本
+; 安装脚本
 Filename: "{app}\install_script\install_script.exe"; Description: "Installing MITM Certificate"; Flags: runhidden waituntilterminated;
 ; 启动配置代理脚本，用户自定义配置
 ;Filename: "{app}\proxy_config\proxy_config.exe"; Description: "Configure Proxy Settings"; Flags: waituntilterminated postinstall
 ; 注册并启动 Windows 主服务
-Filename: "{sys}\sc.exe"; Parameters: "create InPurityService binPath= ""{app}\main_service\main_service.exe"" start= auto"; Flags: runhidden shellexec waituntilterminated
-Filename: "{sys}\sc.exe"; Parameters: "start InPurityService"; Flags: runhidden shellexec waituntilterminated
+;Filename: "{sys}\sc.exe"; Parameters: "create InPurityService binPath= ""{app}\main_service\main_service.exe"" start= auto"; Flags: runhidden shellexec waituntilterminated
+;Filename: "{sys}\sc.exe"; Parameters: "start InPurityService"; Flags: runhidden shellexec waituntilterminated
 ; 注册并启动守护服务
-Filename: "{sys}\sc.exe"; Parameters: "create InPurityDaemonService binPath= ""{app}\daemon_service\daemon_service.exe"" start= auto displayname= ""Windows Event Notifier"""; Flags: runhidden shellexec waituntilterminated
-Filename: "{sys}\sc.exe"; Parameters: "start InPurityDaemonService"; Flags: runhidden shellexec waituntilterminated
+;Filename: "{sys}\sc.exe"; Parameters: "create InPurityDaemonService binPath= ""{app}\daemon_service\daemon_service.exe"" start= auto displayname= ""Windows Event Notifier"""; Flags: runhidden shellexec waituntilterminated
+;Filename: "{sys}\sc.exe"; Parameters: "start InPurityDaemonService"; Flags: runhidden shellexec waituntilterminated
 
 [UninstallRun]
 ; 停止并删除服务
-Filename: "{sys}\sc.exe"; Parameters: "stop InPurityService"; RunOnceId: "stopmain"; Flags: runhidden shellexec waituntilterminated
-Filename: "{sys}\sc.exe"; Parameters: "delete InPurityService"; RunOnceId: "deletemain"; Flags: runhidden shellexec waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "stop InPurityDaemonService"; RunOnceId: "stopdaemon"; Flags: runhidden shellexec waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "delete InPurityDaemonService"; RunOnceId: "deletedaemon"; Flags: runhidden shellexec waituntilterminated
+Filename: "{sys}\sc.exe"; Parameters: "stop InPurityService"; RunOnceId: "stopmain"; Flags: runhidden shellexec waituntilterminated
+Filename: "{sys}\sc.exe"; Parameters: "delete InPurityService"; RunOnceId: "deletemain"; Flags: runhidden shellexec waituntilterminated
 
 [UninstallDelete]
 Type: files; Name: "{app}\main_service\*"

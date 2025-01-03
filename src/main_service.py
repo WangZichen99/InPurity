@@ -1,23 +1,23 @@
-import win32serviceutil
-import win32service
-import win32event
-import servicemanager
+import os
+import sys
+import time
+import signal
+import psutil
+import winreg
+import random
 import socket
+import logging
+import traceback
 import threading
 import subprocess
-import winreg
-import sys
-import os
-import psutil
-import time
-import logging
-from logging.handlers import TimedRotatingFileHandler
-import traceback
-import random
-import signal
-from db_manager import DatabaseManager
+import win32event
+import win32service
+import servicemanager
+import win32serviceutil
 from filelock import FileLock
+from db_manager import DatabaseManager
 from registry_monitor import RegistryMonitor
+from logging.handlers import TimedRotatingFileHandler
 from constants import MITMDUMP_PATH, MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, LOG_PATH, SCRIPT_PATH, SERVICE_SUB_KEY
 
 class InPurityService(win32serviceutil.ServiceFramework):
@@ -81,28 +81,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
         mitmproxy_logger.addHandler(mitmproxy_handler)
         return logger, mitmproxy_logger
 
-    """
-    def set_service_as_critical(self):
-        '''
-        设置服务为关键服务
-        '''
-        try:
-            key_path = r"SYSTEM\CurrentControlSet\Services\{}".format(self._svc_name_)
-            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_ALL_ACCESS)
-            try:
-                service_type, _ = winreg.QueryValueEx(key, "Type")
-                if service_type != 0x120:
-                    winreg.SetValueEx(key, "Type", 0, winreg.REG_DWORD, 0x120)
-                    self.logger.info('服务类型已更新为关键服务')
-            except WindowsError:
-                winreg.SetValueEx(key, "Type", 0, winreg.REG_DWORD, 0x120)
-                self.logger.info('服务类型已设置为关键服务')
-        except WindowsError as e:
-            self.logger.error(f'设置关键服务失败: {str(e)}')
-        finally:
-            winreg.CloseKey(key)
-    """
-
     def SvcDoRun(self):
         try:
             self.logger.info(f'{MAIN_SERVICE_NAME} 服务开始运行')
@@ -150,20 +128,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
         self.service_reg_monitor.stop_monitoring()
         if self.service_reg_monitor_thread:
             self.service_reg_monitor_thread.join(timeout=10)
-
-    """
-    def is_service_running(self, service_name):
-        '''
-        检查服务是否运行
-        '''
-        # for proc in psutil.process_iter(['pid', 'name']):
-        #     if proc.info['name'] == service_name:
-        #         return True
-        for service in psutil.win_service_iter():
-            if service.name() == service_name:
-                return service.status() == 'running'
-        return False
-    """
 
     def check_service(self):
         try:
@@ -413,11 +377,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
                 self.logger.info(f"终止mitmproxy进程错误：{e}")
 
 if __name__ == '__main__':
-    # venv_path = "D:\\Workspace\\Python\\antiproxy\\.venv\\Lib\\site-packages"
-    # sys.path.insert(0, venv_path)
-    # import servicemanager
-    # print("Python executable:", sys.executable)
-
     if len(sys.argv) == 1:
         servicemanager.Initialize()
         servicemanager.PrepareToHostSingle(InPurityService)
@@ -425,10 +384,6 @@ if __name__ == '__main__':
     else:
         win32serviceutil.HandleCommandLine(InPurityService)
 
-    # if len(sys.argv) == 1:
-    #     # 本地测试逻辑
-    #     service = InPurityService([MAIN_SERVICE_NAME])
-    #     service.main()  # 直接运行服务的主逻辑
-    # else:
-    #     # Windows 服务管理的控制逻辑
-    #     win32serviceutil.HandleCommandLine(InPurityService)
+    # 本地测试逻辑
+    # service = InPurityService([MAIN_SERVICE_NAME])
+    # service.SvcDoRun()  # 直接运行服务的主逻辑

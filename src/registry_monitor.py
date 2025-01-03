@@ -1,10 +1,10 @@
 import ctypes
-from ctypes import wintypes
 import winreg
-import win32api
-import win32event
 import logging
+import win32api
 import traceback
+import win32event
+from ctypes import wintypes
 from filelock import FileLock
 
 KEY_NOTIFY = 0x0010

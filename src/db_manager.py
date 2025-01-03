@@ -49,7 +49,12 @@ class DatabaseManager:
                 ('socket_port', '51001', '0'),
                 ('connection_strategy', 'lazy', '1'),
                 ('block_global', 'false', '1'),
-                ('stream_large_bodies', '1m', '1')
+                ('stream_large_bodies', '5m', '1'),
+                ('keep_host_header', 'true', '1'),
+                ('ssl_insecure', 'true', '1'),
+                ('upstream_cert', 'true', '1'), 
+                ('anticache', 'true', '1'),
+                ('anticomp', 'true', '1')
             ''')
 
             connection.commit()

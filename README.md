@@ -59,8 +59,11 @@ This program installs two services: a main service and a daemon service.
 - **Daemon Service**:  
   The daemon service monitors the status of the main service and checks for changes to the Windows proxy settings to prevent the service from being stopped or the proxy from being disabled unexpectedly.
 
-## Acknowledgements
+## Thanks
 This project makes use of the following open-source project:
+
+- **[mitmproxy](https://github.com/mitmproxy/mitmproxy)**
+  An interactive TLS-capable intercepting HTTP proxy for penetration testers and software developers.
 
 - **[Deep NN for NSFW Detection](https://github.com/GantMan/nsfw_model)**  
   Developed by Gant Laborde. A deep neural network model for detecting NSFW content.

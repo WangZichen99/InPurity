@@ -1,8 +1,7 @@
-from db_manager import DatabaseManager
-# from constants import MAIN_SERVICE_NAME
+import re
 import socket
 import random
-import re
+from db_manager import DatabaseManager
 
 def validate_port(port):
     return 49152 <= port <= 65535
@@ -49,8 +48,8 @@ if __name__ == '__main__':
     print("--set_option [name=value]：设置mitmproxy配置项")
     print("--delete_option [name]：删除某个mitmproxy配置项")
     print("--restart：重启代理，注意：修改代理设置后需要重启代理")
-    print("--select_all: 查询所有设置")
     print("--select [name]: 查询指定的设置")
+    print("--select_all: 查询所有设置")
     print("--help: 显示使用方法")
     print("")
     db_manager = DatabaseManager()
@@ -81,8 +80,8 @@ if __name__ == '__main__':
                     print("--set_option [name=value]：设置mitmproxy配置项")
                     print("--delete_option [name]：删除某个mitmproxy配置项")
                     print("--restart：重启代理，注意：修改代理设置后需要重启代理")
-                    print("--select_all: 查询所有设置")
                     print("--select [name]: 查询指定的设置")
+                    print("--select_all: 查询所有设置")
                     print("--help: 显示使用方法")
                 else:
                     print("未知的选项，请输入有效的选项。")
