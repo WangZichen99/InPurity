@@ -13,7 +13,7 @@ if getattr(sys, 'frozen', False):
     MAIN_SERVICE_PATH = os.path.join(BASE_DIR, 'main_service\\main_service.exe')
     DAEMON_SERVICE_PATH = os.path.join(BASE_DIR, 'daemon_service\\daemon_service.exe')
     # 配置执行文件
-    CONFIG_PATH = os.path.join(BASE_DIR, 'proxy_config')
+    CONFIG_PATH = os.path.join(BASE_DIR, 'proxy_config\\')
     # run_mitmdump 路径
     RUN_MITMDUMP_PATH = os.path.join(BASE_DIR, 'run_mitmdump')
     MITMDUMP_PATH = os.path.join(RUN_MITMDUMP_PATH, 'run_mitmdump.exe')
@@ -28,7 +28,7 @@ else:
     MAIN_SERVICE_PATH = os.path.join(BASE_DIR, 'dist\\main_service\\main_service.exe')
     DAEMON_SERVICE_PATH = os.path.join(BASE_DIR, 'dist\\daemon_service\\daemon_service.exe')
     # 配置执行文件
-    CONFIG_PATH = os.path.join(BASE_DIR, 'dist\\proxy_config')
+    CONFIG_PATH = os.path.join(BASE_DIR, 'dist\\proxy_config\\')
     # mitmdump 路径
     # MITMDUMP_PATH = os.path.join(BASE_DIR, '.venv\\Scripts\\mitmdump.exe')
     MITMDUMP_PATH = os.path.join(BASE_DIR, 'dist\\run_mitmdump\\run_mitmdump.exe')

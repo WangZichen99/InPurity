@@ -73,6 +73,10 @@ class InPurityProxy:
             flow.kill()
             self.logger.info(f"拦截黑名单 URL 请求: {flow.request.url}")
 
+    def responseheaders(self, flow: http.HTTPFlow) -> None:
+        # 开启流式处理适配
+        flow.response.stream = flow.response.headers.get('content-type', '').startswith('text/event-stream');
+
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.response.status_code == 200:
             content_type = flow.response.headers.get("Content-Type", "")

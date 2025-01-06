@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "InPurity"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.4"
 #define MyAppPublisher "purity"
 
 [Setup]
@@ -16,14 +16,13 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 PrivilegesRequired=admin
-; Uncomment the following line to run in non administrative install mode (install for current user only.)
-;PrivilegesRequired=lowest
 OutputDir=D:\Workspace\Python\antiproxy\InPuritySetup
-OutputBaseFilename=InPuritySetup
+;OutputBaseFilename=InPurity-uninstallable
+OutputBaseFilename=InPurity-no-uninstaller
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
-;Uninstallable=no
+Uninstallable=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

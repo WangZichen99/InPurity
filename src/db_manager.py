@@ -45,16 +45,8 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT OR IGNORE INTO config (key, value, config_type) VALUES 
                 ('proxy_port', '51949', '0'),
-                ('upstream_enable', '0', '0'),
                 ('socket_port', '51001', '0'),
-                ('connection_strategy', 'lazy', '1'),
-                ('block_global', 'false', '1'),
-                ('stream_large_bodies', '5m', '1'),
-                ('keep_host_header', 'true', '1'),
-                ('ssl_insecure', 'true', '1'),
-                ('upstream_cert', 'true', '1'), 
-                ('anticache', 'true', '1'),
-                ('anticomp', 'true', '1')
+                ('upstream_enable', '0', '0')
             ''')
 
             connection.commit()

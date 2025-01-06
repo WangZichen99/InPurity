@@ -226,10 +226,11 @@ class InPurityService(win32serviceutil.ServiceFramework):
     def get_mitmproxy_option(self):
         options = self.db_manager.get_all_options()
         formatted_options = []
-        for option_name, option_value in options:
-            formatted_options.append('--set')
-            formatted_options.append(f"{option_name}={option_value}")
-        self.logger.info(f'获取代理配置： {formatted_options}')
+        if options:
+            for option_name, option_value in options:
+                formatted_options.append('--set')
+                formatted_options.append(f"{option_name}={option_value}")
+            self.logger.info(f'获取代理配置： {formatted_options}')
         return formatted_options
 
     def is_port_available(self, port):
