@@ -2,8 +2,8 @@ import ctypes
 import winreg
 import logging
 import win32api
-import traceback
 import win32event
+from i18n import I18n
 from ctypes import wintypes
 from filelock import FileLock
 
@@ -18,7 +18,7 @@ WINREG_2_CTYPES = {
 }
 
 class RegistryMonitor:
-    def __init__(self, registry_type, registry_path, sub_key, callback, wait_millis, log_name):
+    def __init__(self, registry_type, registry_path, sub_key, callback, wait_millis, logger):
         self.registry_type = WINREG_2_CTYPES.get(registry_type)
         self.registry_path = registry_path
         self.sub_key = sub_key
@@ -27,7 +27,7 @@ class RegistryMonitor:
         self.hkey = None
         self.event = win32event.CreateEvent(None, 0, 0, None)
         self.stop_event = win32event.CreateEvent(None, 0, 0, None)
-        self.logger = logging.getLogger(log_name)
+        self.logger = logger
 
     def start_monitoring(self):
         # 打开注册表项
@@ -35,7 +35,7 @@ class RegistryMonitor:
         if self.hkey is None:
             return
         # 开始监听注册表项的变化
-        self.logger.info(f"开始监听 {self.hkey}")
+        self.logger.info(I18n.get("START_REGISTRY_MONITORING", self.hkey))
         self._monitor_registry_change()
 
     def _open_registry_key(self, hive, subkey):
@@ -45,7 +45,7 @@ class RegistryMonitor:
                 hkey = winreg.OpenKey(hive, subkey, 0, winreg.KEY_READ | winreg.KEY_NOTIFY)
                 return hkey
         except Exception as e:
-            self.logger.error(f"无法打开注册表项: {self.registry_path}, 错误: {e}")
+            self.logger.exception(I18n.get("REGISTRY_OPEN_ERROR", self.registry_path, e))
             return None
 
     def _read_registry_values(self):
@@ -61,11 +61,10 @@ class RegistryMonitor:
                 elif regtype == winreg.REG_DWORD:
                     values[value_name] = value
                 else:
-                    self.logger.warning(f"未处理的注册表类型: {regtype} 对于值: {value_name}")
+                    self.logger.warning(I18n.get("UNHANDLED_REGISTRY_TYPE", regtype, value_name))
                     values[value_name] = None
             except Exception as e:
-                self.logger.error(f"无法读取注册表值: {value_name}, 错误: {e}")
-                self.logger.error("Traceback: %s", traceback.format_exc())
+                self.logger.exception(I18n.get("REGISTRY_READ_ERROR", value_name, e))
                 values[value_name] = None
         return values
 
@@ -82,16 +81,16 @@ class RegistryMonitor:
                 True                         # 异步操作
             )
             if result != 0:
-                self.logger.error("无法设置注册表通知")
+                self.logger.exception(I18n.get("REGISTRY_NOTIFY_ERROR"))
                 break
             # 等待注册表变化事件
             handles = (self.event, self.stop_event)
             ret = win32event.WaitForMultipleObjects(handles, 0, self.wait_millis)
             if ret == win32event.WAIT_OBJECT_0 + 1:
-                self.logger.info("收到停止信号")
+                self.logger.info(I18n.get("STOP_SIGNAL_RECEIVED"))
                 break
             elif ret == win32event.WAIT_OBJECT_0:
-                self.logger.info("检测到代理设置发生变化")
+                self.logger.info(I18n.get("PROXY_SETTINGS_CHANGED"))
                 new_values = self._read_registry_values()
                 self.callback(new_values)  # 触发回调函数，并传递新读取的值
                 # 重置事件并继续监听
@@ -99,9 +98,9 @@ class RegistryMonitor:
             elif ret == win32event.WAIT_TIMEOUT:
                 continue
             else:
-                self.logger.error(f"等待事件时发生错误: {ret}")
+                self.logger.exception(I18n.get("EVENT_WAIT_ERROR", ret))
                 break
-        self.logger.info(f"{self.hkey} 监听结束")
+        self.logger.info(I18n.get("REGISTRY_MONITORING_ENDED", self.hkey))
         self.cleanup()
 
     def stop_monitoring(self):

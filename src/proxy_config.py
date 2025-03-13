@@ -1,157 +1,232 @@
 import re
 import socket
-import random
-import cmd2
-from typing import List
+
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.styles import Style
+
+from i18n import I18n as _
 from db_manager import DatabaseManager
 
-class ProxyConfig(cmd2.Cmd):
+class ProxyConfigCompleter(Completer):
+    """自定义命令补全器"""
+    
+    def __init__(self, proxy_config):
+        self.proxy_config = proxy_config
+        self.commands = {
+            'port': self.complete_port,
+            'upstream': self.complete_upstream,
+            'batch': self.complete_batch,
+            'setopt': self.complete_empty,
+            'delopt': self.complete_delopt,
+            'select': self.complete_select,
+            'restart': self.complete_empty,
+            'quit': self.complete_empty,
+            'help': self.complete_help,
+            '?': self.complete_help
+        }
+        # 缓存常用选项列表，避免频繁查询数据库
+        self.options_cache = None
+        self.configs_cache = None
+        self.last_cache_update = 0
+    
+    def _should_refresh_cache(self):
+        """检查是否应该刷新缓存（5秒过期）"""
+        import time
+        current_time = time.time()
+        if current_time - self.last_cache_update > 5:
+            self.last_cache_update = current_time
+            return True
+        return False
+    
+    def get_completions(self, document, complete_event):
+        text = document.text
+        if ' ' in text:
+            # 命令参数补全
+            cmd, arg = text.split(' ', 1)
+            cmd = cmd.strip()
+            arg = arg.strip()
+            
+            if cmd in self.commands:
+                for completion in self.commands[cmd](arg):
+                    yield Completion(completion, start_position=-len(arg))
+        else:
+            # 命令名补全
+            for cmd in self.commands:
+                if cmd.startswith(text):
+                    yield Completion(cmd, start_position=-len(text))
+    
+    def complete_port(self, text):
+        if not text:
+            return ['51949']
+        return []
+    
+    def complete_upstream(self, text):
+        options = ['enable', 'disable', 'http://', 'https://']
+        return [opt for opt in options if opt.startswith(text)]
+    
+    def complete_batch(self, text):
+        options = ['enable', 'disable']
+        return [opt for opt in options if opt.startswith(text)]
+    
+    def complete_delopt(self, text):
+        # 使用缓存减少数据库查询
+        if self.options_cache is None or self._should_refresh_cache():
+            self.options_cache = self.proxy_config.db_manager.get_all_options()
+        
+        option_names = [opt[0] for opt in self.options_cache]
+        return [opt for opt in option_names if opt.startswith(text)]
+    
+    def complete_select(self, text):
+        # 使用缓存减少数据库查询
+        if self.configs_cache is None or self._should_refresh_cache():
+            self.configs_cache = self.proxy_config.db_manager.get_all_configs()
+        
+        config_names = [conf[0] for conf in self.configs_cache]
+        return [conf for conf in config_names if conf.startswith(text)]
+    
+    def complete_help(self, text):
+        return [cmd for cmd in self.commands if cmd.startswith(text)]
+    
+    def complete_empty(self, text):
+        return []
+
+class ProxyConfig:
     def __init__(self):
-        # 设置要隐藏的命令
-        hidden_commands = ['alias', 'edit', 'eof', 'history', 'macro', 'run_pyscript', 'run_script', 'shell', 'shortcuts', 'py', 'set']
-        super().__init__(allow_cli_args=False)
-        
-        # 隐藏不需要的命令
-        for command in hidden_commands:
-            setattr(self, f'do_{command}', None)
-            setattr(self, f'help_{command}', None)
-            setattr(self, f'complete_{command}', None)
-        
         self.db_manager = DatabaseManager()
         self.HOST = "127.0.0.1"
-        self.prompt = "InPurity> "
-        self.intro = """代理配置工具
-使用 help 或 ? 查看帮助
-使用 Tab 键自动补全命令和参数"""
         
-        # 设置命令分类
+        # 命令处理函数映射
+        self.commands = {
+            'port': self.cmd_port,
+            'upstream': self.cmd_upstream,
+            'setopt': self.cmd_setopt,
+            'delopt': self.cmd_delopt,
+            'select': self.cmd_select,
+            'batch': self.cmd_batch,
+            'restart': self.cmd_restart,
+            'quit': self.cmd_quit,
+            'help': self.cmd_help,
+            '?': self.cmd_help
+        }
+        
+        # 命令帮助文档
+        self.help_docs = {
+            'port': _.get('help_port'),
+            'upstream': _.get('help_upstream'),
+            'setopt': _.get('help_setopt'),
+            'delopt': _.get('help_delopt'),
+            'select': _.get('help_select'),
+            'batch': _.get('help_batch'),
+            'restart': _.get('help_restart'),
+            'quit': _.get('help_quit'),
+            'help': _.get('help_help')
+        }
+        
+        # 命令分类 - 使用国际化
         self.categories = {
-            'Proxy Settings': ['port', 'upstream'],
-            'Configuration': ['setopt', 'delopt', 'select'],
-            'System': ['restart', 'quit']
+            _.get('category_proxy_settings'): ['port', 'upstream', 'batch'],
+            _.get('category_config_management'): ['setopt', 'delopt', 'select'],
+            _.get('category_system_operations'): ['restart', 'quit']
         }
         
-        # 设置命令分组显示
-        self.cmd_categories = {
-            cmd: category for category, cmds in self.categories.items() for cmd in cmds
-        }
-
+        # 设置样式
+        self.style = Style.from_dict({
+            'prompt': 'ansicyan bold',
+            'output': '',
+            'error': 'ansired bold',
+        })
+        
+        # 创建会话
+        self.session = PromptSession(
+            completer=ProxyConfigCompleter(self),
+            style=self.style,
+            # history_filename='.inpurity_history'
+        )
+    
     def validate_port(self, port):
         return 49152 <= port <= 65535
 
     def is_valid_upstream_server(self, server):
-        pattern = r'^(http|https)://\d{1,3}(\.\d{1,3}){3}:\d+$'
+        """验证上游服务器地址，支持IP和域名"""
+        # 支持域名或IP地址
+        pattern = r'^(http|https)://([a-zA-Z0-9][-a-zA-Z0-9.]*(\.[a-zA-Z0-9][-a-zA-Z0-9.]*)+|\d{1,3}(\.\d{1,3}){3}):\d+$'
         return re.match(pattern, server) is not None
 
     def is_port_available(self, port):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind(('localhost', port))
-            return True, port
+            return True
         except socket.error:
-            return False, port
+            return False
 
-    def get_socket_port(self):
+    def send_restart_command(self):
         socket_port = self.db_manager.get_config("socket_port")
-        if socket_port and self.is_port_available(int(socket_port)):
-            return int(socket_port)
-        else:
-            while not socket_port or not self.is_port_available(int(socket_port)):
-                socket_port = random.randint(49152, 65535)
-            self.db_manager.update_config("socket_port", socket_port)
-            return socket_port
-
-    def send_restart_command(self, socket_port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.connect((self.HOST, socket_port))
+                s.connect((self.HOST, int(socket_port)))
                 s.sendall(b"RESTART")
-                self.poutput("已发送重启命令")
+                self.print_output(_.get('restart_sent'))
             except ConnectionRefusedError as cre:
-                self.perror(f"{cre}请确认代理服务是否启动")
+                self.print_error(_.get('restart_error', cre))
             except Exception as e:
-                self.perror(str(e))
-
-    def complete_port(self, text, line, begidx, endidx) -> List[str]:
-        """端口号自动补全"""
-        if not text:
-            return ['51949']  # 默认端口
-        return []
-
-    def complete_upstream(self, text, line, begidx, endidx) -> List[str]:
-        """upstream命令自动补全"""
-        options = ['enable', 'disable', 'http://', 'https://']
-        if not text:
-            return options
-        return [opt for opt in options if opt.startswith(text)]
-
-    def complete_delopt(self, text, line, begidx, endidx) -> List[str]:
-        """delopt命令的配置项自动补全"""
-        all_options = self.db_manager.get_all_options()
-        option_names = [opt[0] for opt in all_options]
-        if not text:
-            return option_names
-        return [opt for opt in option_names if opt.startswith(text)]
-
-    def complete_select(self, text, line, begidx, endidx) -> List[str]:
-        """select命令的配置项自动补全"""
-        all_configs = self.db_manager.get_all_configs()
-        config_names = [conf[0] for conf in all_configs]
-        if not text:
-            return config_names
-        return [conf for conf in config_names if conf.startswith(text)]
-
-    def do_port(self, arg):
-        """设置代理端口 port <port_number> 端口范围: 49152-65535"""
+                self.print_error(_.get('error_generic', str(e)))
+    
+    def print_output(self, text):
+        print(text)
+    
+    def print_error(self, text):
+        print(f"\033[91m{text}\033[0m")  # 红色输出错误信息
+    
+    def cmd_port(self, arg):
         if not arg:
-            self.perror("请指定端口号")
+            self.print_error(_.get('port_required'))
             return
         try:
             port = int(arg)
             if self.validate_port(port):
                 if self.is_port_available(port):
                     self.db_manager.update_config('proxy_port', port)
-                    self.poutput(f"代理端口已设置为: {port}")
+                    self.print_output(_.get('port_set', port))
                 else:
-                    self.perror(f"端口 {port} 已被占用")
+                    self.print_error(_.get('port_in_use', port))
             else:
-                self.perror(f"端口号 {port} 不在范围 49152 到 65535 之间")
+                self.print_error(_.get('port_out_range', port))
         except ValueError:
-            self.perror("无效的端口号，必须为数字")
-
-    def do_upstream(self, arg):
-        """上游代理设置 upstream enable(启用)|disable(禁用)|http[s]://host:port(设置上游代理服务器)"""
+            self.print_error(_.get('port_invalid'))
+    
+    def cmd_upstream(self, arg):
         if not arg:
-            self.perror("请指定操作类型")
+            self.print_error(_.get('operation_required'))
             return
 
         if arg == 'enable':
             upstream_server = self.db_manager.get_config('upstream_server')
             if upstream_server:
                 self.db_manager.update_config('upstream_enable', 1)
-                self.poutput("上游代理已启用")
+                self.print_output(_.get('upstream_enabled'))
             else:
-                self.perror("上游代理服务未设置，请先设置上游代理服务器地址")
+                self.print_error(_.get('upstream_not_set'))
         elif arg == 'disable':
             self.db_manager.update_config('upstream_enable', 0)
-            self.poutput("上游代理已禁用")
+            self.print_output(_.get('upstream_disabled'))
         elif arg.startswith(('http://', 'https://')):
             if self.is_valid_upstream_server(arg):
                 self.db_manager.update_config('upstream_server', arg)
                 self.db_manager.update_config('upstream_enable', 1)
-                self.poutput(f"上游代理服务已设置为: {arg} 并已启用")
+                self.print_output(_.get('upstream_set', arg))
             else:
-                self.perror("无效的上游代理服务格式，请使用 'http://ip:port' 或 'https://ip:port' 格式")
+                self.print_error(_.get('upstream_invalid'))
         else:
-            self.perror("无效的upstream命令，请使用 enable、disable 或输入代理服务器地址")
-
-    def do_setopt(self, arg):
-        """设置mitmproxy配置项 setopt <name>=<value>"""
+            self.print_error(_.get('upstream_cmd_invalid'))
+    
+    def cmd_setopt(self, arg):
         if not arg:
-            self.perror("请指定配置项和值")
+            self.print_error(_.get('option_required'))
             return
         if '=' not in arg:
-            self.perror("无效的输入，必须包含=")
+            self.print_error(_.get('option_invalid'))
             return
         
         name, value = arg.split('=', 1)
@@ -159,74 +234,107 @@ class ProxyConfig(cmd2.Cmd):
         value = value.strip()
             
         self.db_manager.update_option(name, value)
-        self.poutput(f"设置 {name} = {value}")
-
-    def do_delopt(self, arg):
-        """删除mitmproxy配置项 delopt <name>"""
+        self.print_output(_.get('option_set', name, value))
+    
+    def cmd_delopt(self, arg):
         if not arg:
-            self.perror("请指定要删除的配置项名称")
+            self.print_error(_.get('option_name_required'))
             return
         
         count = self.db_manager.delete_option(arg)
         if count > 0:
-            self.poutput(f"配置项 {arg} 已删除")
+            self.print_output(_.get('option_deleted', arg))
         else:
-            self.perror(f"未找到配置项 {arg}")
-
-    def do_select(self, arg):
-        """查询配置 select <name>"""
+            self.print_error(_.get('option_not_found', arg))
+    
+    def cmd_select(self, arg):
         if arg:
             config_value = self.db_manager.get_config(arg)
             if config_value is not None:
-                self.poutput(f"{arg}: {config_value}")
+                self.print_output(_.get('config_value_display', arg, config_value))
             else:
-                self.perror(f"未找到设置: {arg}")
+                self.print_error(_.get('config_not_found', arg))
         else:
             all_configs = self.db_manager.get_all_configs()
-            self.poutput("所有配置:")
+            self.print_output(_.get('all_configs'))
             for config in all_configs:
-                self.poutput(f"{config[0]}: {config[1]}")
+                self.print_output(_.get('config_value_display', config[0], config[1]))
+    
+    def cmd_batch(self, arg):
+        if not arg:
+            self.print_error(_.get("batch_required"))
+            return
 
-    def do_restart(self, _):
-        """重启代理服务"""
-        socket_port = self.get_socket_port()
-        self.send_restart_command(socket_port)
+        arg = arg.lower()
+        if arg not in ['enable', 'disable']:
+            self.print_error(_.get("batch_cmd_invalid"))
+            return
 
-    def do_quit(self, _):
-        """退出程序"""
+        try:
+            self.db_manager.update_config(
+                'enable_batch_processing',
+                '1' if arg == 'enable' else '0'
+            )
+            self.print_output(_.get("batch_enabled" if arg == 'enable' else "batch_disabled"))
+        except Exception as e:
+            self.print_error(_.get('error_generic', str(e)))
+    
+    def cmd_restart(self, _):
+        self.send_restart_command()
+    
+    def cmd_quit(self, _):
         return True
-
-    def do_EOF(self, _):
-        return self.do_quit(_)
-
-    def do_help(self, arg):
-        """显示帮助信息"""
+    
+    def cmd_help(self, arg):
         if arg:
             # 显示特定命令的帮助
-            try:
-                func = getattr(self, 'do_' + arg)
-                doc = func.__doc__
-                if doc:
-                    self.poutput(doc)
-                else:
-                    self.poutput(f"命令 '{arg}' 没有帮助文档")
-            except AttributeError:
-                self.poutput(f"未知命令: '{arg}'")
+            if arg in self.help_docs:
+                self.print_output(self.help_docs[arg])
+            else:
+                self.print_output(_.get('unknown_command', arg))
         else:
             # 显示所有命令的帮助
-            self.poutput("\n可用命令:")
+            self.print_output(_.get('available_commands'))
             for category, commands in self.categories.items():
+                self.print_output(f"\n{category}:")
                 for cmd in commands:
-                    func = getattr(self, 'do_' + cmd)
-                    if func and func.__doc__:
-                        # 显示完整的文档字符串
-                        doc = func.__doc__
-                        # 对文档进行缩进处理，使其更易读
-                        self.poutput(f"  {cmd:<10}{doc}\n")
-
-    # 设置 ? 为help命令的别名
-    do_question = do_help
+                    if cmd in self.help_docs:
+                        # 显示第一行帮助信息作为简要说明
+                        doc = self.help_docs[cmd].split('\n')[0]
+                        self.print_output(f"  {cmd:<10}{doc}")
+    
+    def run(self):
+        print(_.get('proxy_tool_intro'))
+        
+        while True:
+            try:
+                text = self.session.prompt('InPurity> ')
+                text = text.strip()
+                
+                if not text:
+                    continue
+                
+                # 解析命令和参数
+                parts = text.split(' ', 1)
+                cmd = parts[0]
+                arg = parts[1] if len(parts) > 1 else ''
+                
+                # 执行命令
+                if cmd in self.commands:
+                    if self.commands[cmd](arg):
+                        break
+                else:
+                    self.print_error(_.get('unknown_command', cmd))
+            
+            except KeyboardInterrupt:
+                continue
+            except EOFError:
+                break
+            except Exception as e:
+                self.print_error(_.get('error_generic', str(e)))
+        
+        print(_.get('goodbye'))
 
 if __name__ == '__main__':
     app = ProxyConfig()
-    app.cmdloop()
+    app.run()

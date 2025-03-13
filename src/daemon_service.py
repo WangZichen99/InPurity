@@ -2,18 +2,23 @@ import os
 import sys
 import time
 import winreg
-import logging
-import traceback
 import threading
 import win32event
+import pywintypes
 import win32service
 import servicemanager
+from i18n import I18n
 import win32serviceutil
+from log import LogManager
 from filelock import FileLock
+from security import SecurityManager
 from db_manager import DatabaseManager
 from registry_monitor import RegistryMonitor
-from logging.handlers import TimedRotatingFileHandler
-from constants import MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, LOG_PATH, INTERNET_SUB_KEY, SERVICE_SUB_KEY
+from constants import (
+    MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, INTERNET_SUB_KEY, SERVICE_SUB_KEY, TOKEN_PATH,
+    DAEMON_THREAD_JOIN_TIMEOUT, DAEMON_SERVICE_CHECK_DELAY, INTERNET_MONITOR_INTERVAL,
+    SERVICE_MONITOR_INTERVAL, SERVICE_AUTO_START, SERVICE_HOST
+)
 
 class DaemonService(win32serviceutil.ServiceFramework):
     _svc_name_ = DAEMON_SERVICE_NAME
@@ -21,115 +26,221 @@ class DaemonService(win32serviceutil.ServiceFramework):
     _svc_description_ = "Handles system event notifications and forwards critical notifications to registered services for further action. This service is essential for the smooth operation of event-driven components in the system."
 
     def __init__(self, args):
-        self.logger = self._setup_logger()
+        """
+        初始化守护服务
+        
+        Args:
+            args: 服务框架参数
+        """
         self.db_manager = DatabaseManager()
+        self.log_manager = LogManager()
+        self.logger = self.log_manager.get_logger('DaemonService', 'daemon_service')
+        self.security_manager = SecurityManager()
         win32serviceutil.ServiceFramework.__init__(self, args)
-        self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
-        self.reg_dic = self.get_user_sid()
+        self.service_stop_event = win32event.CreateEvent(None, 0, 0, None)
+        self.registry_paths = self.get_user_sid()
+        self.running = True
+        
+        # 初始化线程
+        self.internet_reg_monitor_thread = None
+        self.service_reg_monitor_thread = None
+        
+        # 代理设置监控
         self.internet_reg_monitor = RegistryMonitor(
-            self.reg_dic['internet_key'],
-            self.reg_dic['internet_value'],
+            self.registry_paths['internet_key'],
+            self.registry_paths['internet_value'],
             INTERNET_SUB_KEY,
             self.on_registry_change,
-            10000,
-            DAEMON_SERVICE_NAME) # 初始化注册表监控
+            INTERNET_MONITOR_INTERVAL,
+            self.logger)
+        
+        # 服务设置监控
         self.service_reg_monitor = RegistryMonitor(
-            self.reg_dic['service_key'],
-            self.reg_dic['service_value'],
+            self.registry_paths['service_key'],
+            self.registry_paths['service_value'],
             SERVICE_SUB_KEY,
             self.service_start_change,
-            60000,
-            DAEMON_SERVICE_NAME) # 初始化注册表监控
-        self.running = True
+            SERVICE_MONITOR_INTERVAL,
+            self.logger)
 
-    def _setup_logger(self):
-        if not os.path.exists(LOG_PATH):
-            os.makedirs(LOG_PATH)
-        logger = logging.getLogger(DAEMON_SERVICE_NAME)
-        logger.setLevel(logging.INFO)
-        handler = TimedRotatingFileHandler(
-            os.path.join(LOG_PATH, 'daemon_service.log'),
-            when='midnight',
-            interval=1,
-            backupCount=90,
-            encoding='utf-8')
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        return logger
+    def _start_thread(self, target, name, args=None):
+        """
+        启动一个新线程
+        
+        Args:
+            target: 线程目标函数
+            name: 线程名称
+            args: 线程参数，默认为None
+            
+        Returns:
+            thread: 创建的线程对象
+        """
+        try:
+            thread = threading.Thread(
+                target=target,
+                name=name,
+                args=() if args is None else args
+            )
+            thread.start()
+            self.logger.info(I18n.get("thread_started", name))
+            return thread
+        except Exception as e:
+            self.logger.error(I18n.get("daemon_thread_start_error", str(e)))
+            return None
+
+    def _safely_stop_thread(self, thread, timeout=DAEMON_THREAD_JOIN_TIMEOUT):
+        """
+        安全停止线程
+        
+        Args:
+            thread: 要停止的线程
+            timeout: 等待线程终止的超时时间（秒）
+            
+        Returns:
+            bool: 线程是否成功停止
+        """
+        if thread and thread.is_alive():
+            try:
+                thread.join(timeout=timeout)
+                self.logger.info(I18n.get("thread_stopped", thread.name))
+                return not thread.is_alive()
+            except Exception as e:
+                self.logger.error(I18n.get("daemon_thread_stop_error", str(e)))
+                return False
+        return True
+
+    def _get_config(self, key, default=None):
+        """
+        获取配置值
+        
+        Args:
+            key: 配置键名
+            default: 默认值，如果配置不存在
+            
+        Returns:
+            配置值或默认值
+        """
+        try:
+            return self.db_manager.get_config(key)
+        except Exception as e:
+            self.logger.error(I18n.get("daemon_config_get_error", str(e)))
+            return default
 
     def SvcStop(self):
-        self.logger.info(f'正在停止 {DAEMON_SERVICE_NAME} 服务...')
+        """
+        停止服务
+        """
+        self.logger.info(I18n.get("SVC_STOP_SIGNAL"))
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-        win32event.SetEvent(self.hWaitStop)
+        
+        # 验证卸载标识
+        if not self.security_manager.verify_uninstall_token():
+            self.logger.warning(I18n.get("ILLEGAL_STOP"))
+            self.ReportServiceStatus(win32service.SERVICE_RUNNING)
+            return
+            
+        self.logger.info(I18n.get("DAEMON_SVC_STOPPING"))
         self.running = False
+        
+        # 停止监控线程
         self.internet_reg_monitor.stop_monitoring()
-        if self.internet_reg_monitor_thread:
-            self.internet_reg_monitor_thread.join(timeout=10)
+        self._safely_stop_thread(self.internet_reg_monitor_thread)
+        
         self.service_reg_monitor.stop_monitoring()
-        if self.service_reg_monitor_thread:
-            self.service_reg_monitor_thread.join(timeout=10)
+        self._safely_stop_thread(self.service_reg_monitor_thread)
+        
+        # 清理资源
+        self.log_manager.cleanup(script_name='daemon_service')
+        win32event.SetEvent(self.service_stop_event)
+        self.ReportServiceStatus(win32service.SERVICE_STOPPED)
 
     def SvcDoRun(self):
+        """
+        服务主运行方法
+        """
         try:
-            self.logger.info(f'{DAEMON_SERVICE_NAME} 服务开始运行')
+            self.logger.info(I18n.get("DAEMON_SVC_STARTED"))
             self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-            # 创建并启动一个线程来运行 registry_monitor 的 start_monitoring 方法
-            self.internet_reg_monitor_thread = threading.Thread(target=self.internet_reg_monitor.start_monitoring, daemon=True)
-            self.internet_reg_monitor_thread.start()
-            # 监听服务启动类型
-            self.service_reg_monitor_thread = threading.Thread(target=self.service_reg_monitor.start_monitoring, daemon=True)
-            self.service_reg_monitor_thread.start()
-            # 定时检查主服务状态
-            while self.running:
-                self.check_service()
-                time.sleep(10)
-            # 等待停止事件
-            # win32event.WaitForSingleObject(self.hWaitStop, win32event.INFINITE)
+            self._initialize_service()
+            self._run_main_loop()
         except Exception as e:
-            self.logger.error("An error occurred: %s", str(e))
-            self.logger.error("Traceback: %s", traceback.format_exc())
+            self.logger.exception(I18n.get("daemon_init_error", str(e)))
             self.SvcStop()
             raise
         finally:
-            self.ReportServiceStatus(win32service.SERVICE_STOPPED)  # 错误时停止服务
+            self.ReportServiceStatus(win32service.SERVICE_STOPPED)
 
-    """
-    def is_service_running(self, service_name):
-        # for proc in psutil.process_iter(['pid', 'name']):
-        #     if proc.info['name'] == service_name:
-        #         return True
-        for service in psutil.win_service_iter():
-            if service.name() == service_name:
-                return service.status() == 'running'
-        return False
-    """
+    def _initialize_service(self):
+        """
+        初始化服务
+        """
+        # 删除token文件
+        self.delete_token()
+        
+        # 启动监控线程
+        self.internet_reg_monitor_thread = self._start_thread(
+            self.internet_reg_monitor.start_monitoring,
+            "internet-monitor"
+        )
+        
+        self.service_reg_monitor_thread = self._start_thread(
+            self.service_reg_monitor.start_monitoring,
+            "main-reg-monitor"
+        )
 
-    def check_service(self):
+    def _run_main_loop(self):
+        """
+        运行服务主循环
+        """
+        # 等待初始化完成
+        time.sleep(DAEMON_SERVICE_CHECK_DELAY)
+        while self.running:
+            try:
+                if not self.security_manager.verify_uninstall_token():
+                    # 获取服务状态
+                    status = win32serviceutil.QueryServiceStatus(MAIN_SERVICE_NAME)
+                    # 检查服务是否停止
+                    if status[1] == win32service.SERVICE_STOPPED:
+                        self.logger.info(I18n.get("MAIN_SVC_RESTART_ATTEMPT"))
+                        # 尝试重新启动服务
+                        win32serviceutil.StartService(MAIN_SERVICE_NAME)
+                        self.logger.info(I18n.get("MAIN_SVC_RESTARTED"))
+                time.sleep(1)
+            except pywintypes.error as e:
+                # 处理系统正在关机时的错误 (错误码 1115)
+                if e.args[0] == 1115:
+                    self.logger.warning(I18n.get("SYSTEM_SHUTDOWN_WARNING"))
+                    win32event.WaitForSingleObject(self.service_stop_event, win32event.INFINITE)
+                    break
+                else:
+                    # 记录其他异常
+                    self.logger.exception(I18n.get("ERROR", str(e)))
+            except Exception as e:
+                self.logger.exception(I18n.get("daemon_main_loop_error", str(e)))
+        
+        # 等待停止事件
+        win32event.WaitForSingleObject(self.service_stop_event, win32event.INFINITE)
+
+    def delete_token(self):
+        """
+        删除卸载标记文件
+        """
         try:
-            # 获取服务状态
-            status = win32serviceutil.QueryServiceStatus(MAIN_SERVICE_NAME)
-            # 检查服务是否停止
-            # self.logger.info(f"检测状态SERVICE_STOP_PENDING {status[1] == win32service.SERVICE_STOP_PENDING}")
-            # self.logger.info(f"检测状态SERVICE_STOPPED {status[1] == win32service.SERVICE_STOPPED}")
-            if status[1] == win32service.SERVICE_STOPPED:
-                self.logger.info(f"{MAIN_SERVICE_NAME} 已停止，尝试重启")
-                # 尝试重新启动服务
-                win32serviceutil.StartService(MAIN_SERVICE_NAME)
-                self.logger.info(f"{MAIN_SERVICE_NAME} 服务已被重启")
+            if os.path.exists(TOKEN_PATH):
+                os.remove(TOKEN_PATH)
+                self.logger.info(I18n.get("FILE_DELETED", TOKEN_PATH))
         except Exception as e:
-            self.logger.error(f"重启服务失败 {MAIN_SERVICE_NAME}: {e}")
-
-    def _internet_reg_monitor(self):
-        self.internet_reg_monitor.start_monitoring()
-    
-    def _service_reg_monitor(self):
-        self.service_reg_monitor.start_monitoring()
+            self.logger.error(I18n.get("FILE_DELETE_ERROR", str(e)))
 
     def get_user_sid(self):
-        # username = self.db_manager.get_config("username")
+        """
+        获取用户SID和相关注册表路径
+        
+        Returns:
+            dict: 包含注册表键和值路径的字典
+        """
         reg_dic = {}
-        sid = self.db_manager.get_config("sid")
+        sid = self._get_config("sid")
         reg_dic['internet_key'] = winreg.HKEY_USERS if sid else winreg.HKEY_CURRENT_USER
         reg_dic['internet_value'] = f"{sid}\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" if sid else r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
         reg_dic['service_key'] = winreg.HKEY_LOCAL_MACHINE
@@ -137,62 +248,82 @@ class DaemonService(win32serviceutil.ServiceFramework):
         return reg_dic
 
     def get_proxy_port(self):
-        # 获取用户端口
-        result = self.db_manager.fetchone("SELECT value FROM config WHERE key='proxy_port'")
-        return int(result[0]) if result else None
+        """
+        获取代理端口
+        
+        Returns:
+            int: 代理端口号，如果不存在则返回None
+        """
+        try:
+            result = self.db_manager.fetchone("SELECT value FROM config WHERE key='proxy_port'")
+            return int(result[0]) if result else None
+        except Exception as e:
+            self.logger.error(I18n.get("daemon_config_get_error", str(e)))
+            return None
     
     def service_start_change(self, new_values):
-        self.logger.info(f"检测到代理设置变化，新值: {new_values}")
-        expected_values = {"Start": 0x00000002}
-        for key, monitor_values in new_values.items():
-            if monitor_values != expected_values.get(key):
-                logging.info(f"{key} 被篡改，正在修正...")
-                with FileLock(self.reg_dic['service_value']):
-                    with winreg.OpenKey(self.reg_dic['service_key'], self.reg_dic['service_value'], 0, winreg.KEY_ALL_ACCESS) as reg_key:
-                        try:
-                            winreg.SetValueEx(reg_key, key, 0, winreg.REG_DWORD, expected_values.get(key))
-                            logging.info(f"{key} 修正完成")
-                        except Exception as e:
-                            self.logger.error(f'修正代理设置出错: {e}')
-                            self.logger.error("Traceback: %s", traceback.format_exc())
+        """
+        处理服务启动类型变更
+        
+        Args:
+            new_values: 新的注册表值
+        """
+        time.sleep(1)
+        scm = None
+        service = None
+        
+        try:
+            scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ALL_ACCESS)
+            service = win32service.OpenService(scm, DAEMON_SERVICE_NAME, win32service.SERVICE_ALL_ACCESS) 
+            expected_values = {"Start": SERVICE_AUTO_START}
+            
+            if new_values["Start"] != expected_values["Start"]:
+                self.logger.info(I18n.get("SVC_SETTINGS_CHANGED", new_values))
+                win32service.ChangeServiceConfig(
+                    service, 
+                    win32service.SERVICE_NO_CHANGE, 
+                    win32service.SERVICE_AUTO_START, 
+                    win32service.SERVICE_ERROR_NORMAL, None, None, 0, None, None, None, None)
+        except Exception as e:
+            self.logger.exception(I18n.get("MAIN_SVC_CONFIG_ERROR", str(e)))
+        finally:
+            if service:
+                win32service.CloseServiceHandle(service)
+            if scm:
+                win32service.CloseServiceHandle(scm)
 
     def on_registry_change(self, new_values):
-        """当注册表变化时执行的回调函数"""
-        self.logger.info(f"检测到代理设置变化，新值: {new_values}")
+        """
+        当注册表变化时执行的回调函数
+        
+        Args:
+            new_values: 新的注册表值
+        """
+        self.logger.info(I18n.get("PROXY_SETTINGS_CHANGED", new_values))
+        
+        # 获取代理端口
+        proxy_port = self.get_proxy_port()
+        if not proxy_port:
+            self.logger.error(I18n.get("daemon_config_get_error", "proxy_port not found"))
+            return
+            
         # 这里加入修正代理设置的逻辑
         # 如果检测到的值与预期不符，则修正代理设置
         expected_values = {
             "ProxyEnable": 1,  # 期望启用代理
-            "ProxyServer": "127.0.0.1:" + str(self.get_proxy_port()),  # 期望的代理服务器
+            "ProxyServer": f"{SERVICE_HOST}:{proxy_port}",  # 期望的代理服务器
         }
+        
         for key, monitor_values in new_values.items():
-            if key == "ProxyOverride":
-                # 拆分并过滤掉包含 "127.0.0.1" 或 "localhost" 的值
-                proxy_override_list = monitor_values.split(';')
-                filtered_proxy_override = [entry for entry in proxy_override_list if "127.0.0.1" not in entry and "local" not in entry]
-                if len(proxy_override_list) > len(filtered_proxy_override):
-                    logging.info(f"{key} 被篡改，正在修正...")
-                    # 重新合并为字符串
-                    new_proxy_override = ';'.join(filtered_proxy_override)
-                    # 设置新的 ProxyOverride
-                    with FileLock(self.reg_dic['internet_value']):
-                        with winreg.OpenKey(self.reg_dic['internet_key'], self.reg_dic['internet_value'], 0, winreg.KEY_ALL_ACCESS) as reg_key:
-                            try:
-                                winreg.SetValueEx(reg_key, key, 0, winreg.REG_SZ, new_proxy_override)
-                                logging.info(f"{key} 修正完成")
-                            except Exception as e:
-                                self.logger.error(f'修正代理设置出错: {e}')
-                                self.logger.error("Traceback: %s", traceback.format_exc())
-            elif monitor_values != expected_values.get(key):
-                logging.info(f"{key} 被篡改，正在修正...")
-                with FileLock(self.reg_dic['internet_value']):
-                    with winreg.OpenKey(self.reg_dic['internet_key'], self.reg_dic['internet_value'], 0, winreg.KEY_ALL_ACCESS) as reg_key:
-                        try:
+            if monitor_values != expected_values.get(key):
+                self.logger.info(I18n.get("KEY_TAMPERED", key))
+                try:
+                    with FileLock(self.registry_paths['internet_value']):
+                        with winreg.OpenKey(self.registry_paths['internet_key'], self.registry_paths['internet_value'], 0, winreg.KEY_ALL_ACCESS) as reg_key:
                             winreg.SetValueEx(reg_key, key, 0, winreg.REG_DWORD if key == "ProxyEnable" else winreg.REG_SZ, expected_values.get(key))
-                            logging.info(f"{key} 修正完成")
-                        except Exception as e:
-                            self.logger.error(f'修正代理设置出错: {e}')
-                            self.logger.error("Traceback: %s", traceback.format_exc())
+                            self.logger.info(I18n.get("KEY_CORRECTED", key))
+                except Exception as e:
+                    self.logger.exception(I18n.get("PROXY_CORRECTION_ERROR", str(e)))
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:
