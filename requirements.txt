@@ -1,12 +1,13 @@
-av==13.0.0
 cryptography==44.0.2
-filelock==3.17.0
+filelock==3.18.0
 imageio==2.36.1
 mitmproxy==11.0.2
-numpy==2.2.3
+numpy==2.2.4
 onnxruntime==1.19.2
 Pillow==11.1.0
 prompt_toolkit==3.0.48
 psutil==6.0.0
 pystray==0.19.5
+pywin32==307
 pywin32==308
+streamlit==1.43.2

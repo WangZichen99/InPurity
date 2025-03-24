@@ -1,55 +1,7 @@
 # InPurity
-InPurity是一个Windows服务程序，它包含一个主服务和一个守护服务，能够阻止你的电脑显示色情图片和视频，让你的大脑从多巴胺的陷阱中解脱出来，回归现实生活，当你经过了一段时间的"净化"后，你会找回纯净的内心，感受到生活的美好。
-## 如何使用？
-你可以直接从发布页下载安装包进行安装，安装后的目录结构如下：
-```
-InPurity
-├── daemon_service
-│   ├── _internal
-│   └── daemon_service.exe
-├── gui
-│   ├── _internal
-│   └── gui.exe
-├── install_script
-│   ├── _internal
-│   └── install_script.exe
-├── log
-│   ├── archive
-│   ├── daemon_service_yyyymmdd.log
-│   ├── gui_yyyymmdd.log
-│   ├── in_purity_yyyymmdd_.log
-│   ├── log_manager_yyyymmdd.log
-│   ├── main_service_yyyymmdd.log
-│   └── mitmproxy_yyyymmdd.log
-├── main_service
-│   ├── _internal
-│   └── main_service.exe
-├── model
-│   └── mobilenet_v2.onnx
-├── proxy_config
-│   ├── _internal
-│   └── proxy_config.exe
-├── run_mitmdump
-│   ├── _internal
-│   └── run_mitmdump.exe
-├── icon.ico
-└── purity.db
-```
+InPurity是一个Windows服务程序，它包含一个主服务和一个守护服务，能够阻止你的电脑显示色情图片，让你的大脑从多巴胺的陷阱中解脱出来，回归现实生活，当你经过了一段时间的"净化"后，你会找回纯净的内心，感受到生活的美好。
 
-- `daemon_service.log`：守护服务日志。
-
-- `gui.log`：gui程序启动的日志。
-
-- `in_purity.log`：代理检测结果日志。
-
-- `main_service.log`：主服务日志。
-
-- `mitmproxy.log`：mitmproxy输出日志。
-
-- `proxy_config.exe`：当你在安装程序后，需要进行一些设置来确保能否正常使用mitmproxy。例如：如果你的电脑上已经安装过代理程序，比如：Clash等。你需要通过这个简单的程序来设置上游代理地址等等，这些设置会被保存到purity.db中。
-在安装程序后，你可以通过查看Windows代理设置或直接打开一个网页查看是否正确运行，如果没有正确运行可以通过日志文件来查看问题。
-
-## 它是如何工作的？
+## InPurity是如何工作的？
 这个程序会安装两个服务，一个主服务，一个守护服务。
 
 - **主服务**：
@@ -59,7 +11,7 @@ InPurity
 - **守护服务**：
 将监听主服务状态和Windows代理设置是否变动以防止随意停止服务或关闭代理。
 
-## 感谢
+## 致谢
 本项目使用了以下开源项目：
 
 - **[mitmproxy](https://github.com/mitmproxy/mitmproxy)**
