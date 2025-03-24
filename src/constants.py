@@ -115,6 +115,7 @@ RANDOM_PORT_MIN = 49152
 RANDOM_PORT_MAX = 65535
 DEFAULT_THREAD_TIMEOUT = 5  # 线程停止的默认超时时间（秒）
 MAX_USER_WAIT_SECONDS = 600  # 等待用户进程的最长时间（10分钟）
+EXPECTED_VALUES = {"Start": 0x00000002, "DelayedAutostart": 0x00000001}
 
 # 守护服务相关常量
 DAEMON_THREAD_JOIN_TIMEOUT = 10  # 守护服务线程终止等待时间（秒）

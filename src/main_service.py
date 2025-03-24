@@ -29,7 +29,7 @@ from registry_monitor import RegistryMonitor
 from constants import (MITMDUMP_PATH, MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, 
                        SCRIPT_PATH, SERVICE_SUB_KEY, GUI_PATH, SYSTEM_PROCESSES,
                        SERVICE_HOST, GUI_PIPE_NAME, RANDOM_PORT_MIN, RANDOM_PORT_MAX,
-                       DEFAULT_THREAD_TIMEOUT, MAX_USER_WAIT_SECONDS)
+                       DEFAULT_THREAD_TIMEOUT, MAX_USER_WAIT_SECONDS, EXPECTED_VALUES)
 
 class InPurityService(win32serviceutil.ServiceFramework):
     _svc_name_ = MAIN_SERVICE_NAME
@@ -43,7 +43,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
         Args:
             args: 服务启动参数
         """
-        self.gui_process = None
         self.db_manager = DatabaseManager()
         self.security_manager = SecurityManager()
         self.log_manager = LogManager()
@@ -52,6 +51,8 @@ class InPurityService(win32serviceutil.ServiceFramework):
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.service_stop_event = win32event.CreateEvent(None, 0, 0, None)
         self.registry_paths = self.get_user_sid()  # 获取用户信息和注册表信息
+        self.stop_event = threading.Event()
+        self.gui_process = None
         self.gui_pipe = None
         # mitmproxy进程
         self.mitmproxy_process = None
@@ -66,7 +67,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
         self.server_socket.settimeout(None)
         self.socket_thread = None
         # 监听守护服务配置
-        self.stop_daemon_event = None
         self.stop_daemon_thread = None
         self.service_reg_monitor = RegistryMonitor(
             self.registry_paths['service_key'],
@@ -144,6 +144,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
                 
             # 开始清理资源
             self.logger.info(I18n.get("MAIN_SVC_STOPPING"))
+            self.stop_event.set()
             self.running = False
             
             # 按照依赖关系顺序停止组件
@@ -155,7 +156,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
             # 确保最终清理
             self.log_manager.cleanup(script_name='main_service')
             win32event.SetEvent(self.service_stop_event)
-        self.ReportServiceStatus(win32service.SERVICE_STOPPED)
+            self.ReportServiceStatus(win32service.SERVICE_STOPPED)
 
     def _verify_stop_request(self):
         """
@@ -182,7 +183,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
 
         # 停止GUI进程
         self.stop_gui_process()
-                
+
         # 最后停止守护程序监控
         self.stop_daemon()
 
@@ -193,12 +194,8 @@ class InPurityService(win32serviceutil.ServiceFramework):
         此函数在单独的线程中运行，负责启动GUI程序并建立管道连接
         如果失败，会定期重试，但不会阻塞主服务功能
         """
-        self.gui_pipe = None
-        
-        while self.gui_process is None or self.gui_pipe is None:
+        while not self.stop_event.is_set() and (self.gui_process is None or self.gui_pipe is None):
             try:
-                if self.server_stop_event.is_set():
-                    return
                 # 启动GUI进程
                 if self.gui_process is None or not self.gui_process.is_running():
                     self.gui_process = self.launch_gui_process(GUI_PATH)
@@ -386,13 +383,13 @@ class InPurityService(win32serviceutil.ServiceFramework):
             message_bytes = message.encode() if isinstance(message, str) else message
             win32file.WriteFile(self.gui_pipe, message_bytes)
         except Exception as e:
-            self.logger.exception(I18n.get("GUI_PIPE_WRITE_ERROR", str(e)))
+            if e.args()[0] != 232:
+                self.logger.exception(I18n.get("GUI_PIPE_WRITE_ERROR", str(e)))
             # 关闭失败的管道
-            try:
-                win32file.CloseHandle(self.gui_pipe)
-            except:
-                pass
+            win32file.CloseHandle(self.gui_pipe)
             self.gui_pipe = None
+            if not self.gui_process.is_running():
+                self.gui_process = None
 
     def _start_thread(self, target, name, args=(), daemon=True):
         """
@@ -447,7 +444,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
         """
         def socket_listener():
             self.logger.info(I18n.get("SOCKET_LISTEN_START"))
-            while not self.server_stop_event.is_set():
+            while not self.stop_event.is_set():
                 try:
                     # 接受连接
                     conn, addr = self.server_socket.accept()
@@ -466,7 +463,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
                         self.logger.info(I18n.get("REMOTE_CONN_CLOSED"))
                     else:
                         self.logger.exception(I18n.get("SOCKET_LISTEN_ERROR", e))
-                    if self.server_stop_event.is_set():
+                    if self.stop_event.is_set():
                         break
             # 线程结束前清理
             try:
@@ -476,7 +473,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
                 self.logger.exception(I18n.get("SOCKET_CLOSE_ERROR", e))
                 
         # 创建并启动套接字监听线程
-        self.server_stop_event = threading.Event()
         self.socket_thread = self._start_thread(socket_listener, "socket-communication")
 
     def stop_socket(self):
@@ -488,7 +484,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
         # 停止 socket 监听线程
         try:
             if self.socket_thread:
-                self.server_stop_event.set()  # 触发停止事件
                 # 发送一个空连接来解除accept()阻塞
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -504,6 +499,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
         if self.gui_pipe:
             try:
                 self.gui_pipe.close()
+                self.gui_pipe = None
                 self.logger.info(I18n.get("GUI_PIPE_CLOSED"))
             except Exception as e:
                 self.logger.exception(I18n.get("GUI_PIPE_CLOSE_ERROR", e))
@@ -524,7 +520,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
         """
         def daemon_listener():
             time.sleep(10)
-            while not self.stop_daemon_event.is_set():
+            while not self.stop_event.is_set():
                 try:
                     if not self.security_manager.verify_uninstall_token():
                         # 获取服务状态
@@ -546,8 +542,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
                         # 重新抛出其他异常
                         self.logger.exception(I18n.get("ERROR", e))
             self.logger.info(I18n.get("MONITOR_DAEMON_END"))
-            
-        self.stop_daemon_event = threading.Event()
+
         self.stop_daemon_thread = self._start_thread(daemon_listener, "daemon-monitor")
         
         # 监听守护服务启动类型
@@ -562,9 +557,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
         
         设置停止事件并安全地终止相关线程
         """
-        if self.stop_daemon_event:
-            self.stop_daemon_event.set()
-            
         self._safely_stop_thread(self.stop_daemon_thread)
         
         self.service_reg_monitor.stop_monitoring()
@@ -580,13 +572,10 @@ class InPurityService(win32serviceutil.ServiceFramework):
         Args:
             new_values (dict): 包含变更后服务配置的字典
         """
-        # 检查恢复选项设置
-        time.sleep(1)
         try:
             scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ALL_ACCESS)
-            service = win32service.OpenService(scm, DAEMON_SERVICE_NAME, win32service.SERVICE_ALL_ACCESS) 
-            expected_values = {"Start": 0x00000002}
-            if new_values["Start"] != expected_values["Start"]:
+            service = win32service.OpenService(scm, DAEMON_SERVICE_NAME, win32service.SERVICE_ALL_ACCESS)
+            if new_values.get("Start", "") != EXPECTED_VALUES["Start"]:
                 self.logger.info(I18n.get("SVC_SETTINGS_CHANGED", new_values))
                 win32service.ChangeServiceConfig(
                     service, 

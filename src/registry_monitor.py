@@ -90,7 +90,6 @@ class RegistryMonitor:
                 self.logger.info(I18n.get("STOP_SIGNAL_RECEIVED"))
                 break
             elif ret == win32event.WAIT_OBJECT_0:
-                self.logger.info(I18n.get("PROXY_SETTINGS_CHANGED"))
                 new_values = self._read_registry_values()
                 self.callback(new_values)  # 触发回调函数，并传递新读取的值
                 # 重置事件并继续监听
@@ -111,4 +110,5 @@ class RegistryMonitor:
             ctypes.windll.advapi32.RegCloseKey(self.hkey)
         if self.event:
             win32event.CloseHandle(self.event)
-        win32api.CloseHandle(self.stop_event)
+        if self.stop_event:
+            win32api.CloseHandle(self.stop_event)

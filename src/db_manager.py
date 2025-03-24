@@ -208,6 +208,13 @@ class DatabaseManager:
         """
         result = self.fetchone('SELECT value FROM config WHERE key = ?', (key,))
         return result[0] if result else None
+    
+    def check_type(self, key):
+        """
+        校验设置类型
+        """
+        result = self.fetchone("SELECT config_type FROM config WHERE key = ?", (key,))
+        return result[0] if result else None
 
     def update_config(self, key, value):
         """

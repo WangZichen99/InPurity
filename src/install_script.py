@@ -3,9 +3,9 @@ import time
 import winreg
 import random
 import ctypes
+import asyncio
 import logging
 import platform
-import threading
 import subprocess
 import win32api
 import win32service
@@ -25,7 +25,6 @@ class CertificateInstaller:
     
     def __init__(self):
         """初始化安装程序"""
-        # self.logger = self._setup_logger()
         self.log_manager = LogManager()
         self.logger = self.log_manager.get_logger('installer', 'installer') 
         self.db_manager = DatabaseManager()
@@ -45,7 +44,7 @@ class CertificateInstaller:
         logger.addHandler(handler)
         return logger
 
-    def run_installation(self):
+    async def run_installation(self):
         """执行完整的安装流程"""
         if self._installation_lock:
             self.logger.warning(I18n.get('installer_running'))
@@ -57,12 +56,12 @@ class CertificateInstaller:
             self.add_config_path_to_system_env()
             self.get_user_sid()
             self.setup_or_update_keys()
-            for service_name in [DAEMON_SERVICE_NAME, MAIN_SERVICE_NAME]:
-                self.remove_service(service_name)
-            for serivce_name, service_path in [(DAEMON_SERVICE_NAME, DAEMON_SERVICE_PATH), (MAIN_SERVICE_NAME, MAIN_SERVICE_PATH)]:
-                self.service_handles.append(self.register_service(serivce_name, service_path))
-            for sname, handle in self.service_handles:
-                threading.Thread(target=self.start_service, args=(sname, handle)).start()
+            await asyncio.gather(self.remove_service(DAEMON_SERVICE_NAME), self.remove_service(MAIN_SERVICE_NAME))
+            result = await asyncio.gather(
+                self.register_service(DAEMON_SERVICE_NAME, DAEMON_SERVICE_PATH), 
+                self.register_service(MAIN_SERVICE_NAME, MAIN_SERVICE_PATH)
+            )
+            await asyncio.gather(self.start_service(result[0]), self.start_service(result[1]))
         finally:
             self._installation_lock = False
             self.logger.info(I18n.get("INSTALL_END"))
@@ -212,7 +211,7 @@ class CertificateInstaller:
             self.logger.exception(I18n.get('service_stop_error', e))
             return False
 
-    def remove_service(self, service_name):
+    async def remove_service(self, service_name):
         sname = I18n.get('main_service') if service_name == MAIN_SERVICE_NAME else I18n.get('daemon_service')
         try:
             # 检查服务是否存在
@@ -224,6 +223,8 @@ class CertificateInstaller:
                 else:
                     self.logger.info(I18n.get('service_stop_timeout', sname))
         except Exception as e:
+            if e.args[0] == 1060: # 服务不存在
+                return
             self.logger.exception(I18n.get('service_remove_failed', e))
 
     def _generate_random_service_name(self):
@@ -247,7 +248,7 @@ class CertificateInstaller:
             random.choice(third_word)
         ])
 
-    def register_service(self, service_name, service_path):
+    async def register_service(self, service_name, service_path):
         sname = I18n.get('main_service') if service_name == MAIN_SERVICE_NAME else I18n.get('daemon_service')
         try:
             # 打开服务控制管理器
@@ -273,20 +274,18 @@ class CertificateInstaller:
                     None,                                    # 服务账户
                     None                                     # 密码
                 )
-                win32service.ChangeServiceConfig2(
-                    service_handle,
-                    win32service.SERVICE_CONFIG_DESCRIPTION,
-                    display_name
-                )
+                win32service.ChangeServiceConfig2(service_handle, win32service.SERVICE_CONFIG_DESCRIPTION, display_name)
                 return sname, service_handle
             finally:
                 win32service.CloseServiceHandle(sc_handle)
+                self.logger.info(I18n.get('service_register_success', sname))
         except Exception as e:
             self.logger.error(I18n.get('service_register_failed', sname, e))
             raise
 
-    def start_service(self, sname, service_handle):
+    async def start_service(self, params):
         """启动服务"""
+        sname, service_handle = params
         try:
             win32service.StartService(service_handle, None)
             # 等待服务启动
@@ -304,4 +303,4 @@ class CertificateInstaller:
 
 if __name__ == "__main__":
     installer = CertificateInstaller()
-    installer.run_installation()
+    asyncio.run(installer.run_installation())

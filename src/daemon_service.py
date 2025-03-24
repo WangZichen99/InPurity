@@ -17,7 +17,7 @@ from registry_monitor import RegistryMonitor
 from constants import (
     MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, INTERNET_SUB_KEY, SERVICE_SUB_KEY, TOKEN_PATH,
     DAEMON_THREAD_JOIN_TIMEOUT, DAEMON_SERVICE_CHECK_DELAY, INTERNET_MONITOR_INTERVAL,
-    SERVICE_MONITOR_INTERVAL, SERVICE_AUTO_START, SERVICE_HOST
+    SERVICE_MONITOR_INTERVAL, EXPECTED_VALUES, SERVICE_HOST
 )
 
 class DaemonService(win32serviceutil.ServiceFramework):
@@ -268,16 +268,10 @@ class DaemonService(win32serviceutil.ServiceFramework):
         Args:
             new_values: 新的注册表值
         """
-        time.sleep(1)
-        scm = None
-        service = None
-        
         try:
             scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ALL_ACCESS)
-            service = win32service.OpenService(scm, DAEMON_SERVICE_NAME, win32service.SERVICE_ALL_ACCESS) 
-            expected_values = {"Start": SERVICE_AUTO_START}
-            
-            if new_values["Start"] != expected_values["Start"]:
+            service = win32service.OpenService(scm, DAEMON_SERVICE_NAME, win32service.SERVICE_ALL_ACCESS)
+            if new_values.get("Start", "") != EXPECTED_VALUES["Start"]:
                 self.logger.info(I18n.get("SVC_SETTINGS_CHANGED", new_values))
                 win32service.ChangeServiceConfig(
                     service, 
@@ -287,9 +281,7 @@ class DaemonService(win32serviceutil.ServiceFramework):
         except Exception as e:
             self.logger.exception(I18n.get("MAIN_SVC_CONFIG_ERROR", str(e)))
         finally:
-            if service:
                 win32service.CloseServiceHandle(service)
-            if scm:
                 win32service.CloseServiceHandle(scm)
 
     def on_registry_change(self, new_values):

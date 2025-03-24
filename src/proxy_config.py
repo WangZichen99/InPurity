@@ -232,7 +232,11 @@ class ProxyConfig:
         name, value = arg.split('=', 1)
         name = name.strip()
         value = value.strip()
-            
+
+        if self.db_manager.check_type(name) == '0':
+            self.print_error(_.get('type_error'))
+            return
+
         self.db_manager.update_option(name, value)
         self.print_output(_.get('option_set', name, value))
     

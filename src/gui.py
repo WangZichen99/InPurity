@@ -81,23 +81,24 @@ class ProxyGUI:
         def listen_for_messages():
             self.logger.info(I18n.get("listening_messages"))
             try:
-                win32pipe.ConnectNamedPipe(self.pipe, None)  # 等待客户端连接
-                self.logger.info(I18n.get("client_connected"))
                 while self.running:
-                    try:
-                        # 读取管道数据
-                        hr, data = win32file.ReadFile(self.pipe, 65536)
-                        if hr == 0:
-                            message = data.decode() + "\n"
-                            if message:
-                                self.output_text.config(state=tk.NORMAL)
-                                self.output_text.insert(tk.END, message)
-                                if self.auto_scroll:
-                                    self.output_text.see(tk.END)
-                                self.output_text.config(state=tk.DISABLED)
-                    except Exception as e:
-                        self.logger.exception(I18n.get("pipe_read_error", str(e)))
-                        break
+                    win32pipe.ConnectNamedPipe(self.pipe, None)  # 等待客户端连接
+                    self.logger.info(I18n.get("client_connected"))
+                    while self.running:
+                        try:
+                            # 读取管道数据
+                            hr, data = win32file.ReadFile(self.pipe, 65536)
+                            if hr == 0:
+                                message = data.decode() + "\n"
+                                if message:
+                                    self.output_text.config(state=tk.NORMAL)
+                                    self.output_text.insert(tk.END, message)
+                                    if self.auto_scroll:
+                                        self.output_text.see(tk.END)
+                                    self.output_text.config(state=tk.DISABLED)
+                        except Exception as e:
+                            self.logger.exception(I18n.get("pipe_read_error", str(e)))
+                            break
             except Exception as e:
                 self.logger.exception(I18n.get("pipe_connect_error", str(e)))
             finally:

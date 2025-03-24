@@ -1,13 +1,12 @@
-InPuritySetup/
+.cursor/
+.venv/
 certificates/
-delete/
+log/
 model/tokenizer/
 model/ernie-3.0-mini-zh.onnx
-test/
-log/
+config_web.py
+test.py
 *.db
-setup.py
-.cursor/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
