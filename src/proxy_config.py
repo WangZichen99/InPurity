@@ -4,6 +4,8 @@ import socket
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.styles import Style
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit import print_formatted_text
 
 from i18n import I18n as _
 from db_manager import DatabaseManager
@@ -157,7 +159,7 @@ class ProxyConfig:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.bind(('localhost', port))
-            return True
+                return True
         except socket.error:
             return False
 
@@ -174,10 +176,10 @@ class ProxyConfig:
                 self.print_error(_.get('error_generic', str(e)))
     
     def print_output(self, text):
-        print(text)
+        print_formatted_text(FormattedText([('class:output', text)]), style=self.style)
     
     def print_error(self, text):
-        print(f"\033[91m{text}\033[0m")  # 红色输出错误信息
+        print_formatted_text(FormattedText([('class:error', text)]), style=self.style)
     
     def cmd_port(self, arg):
         if not arg:
@@ -245,11 +247,17 @@ class ProxyConfig:
             self.print_error(_.get('option_name_required'))
             return
         
-        count = self.db_manager.delete_option(arg)
-        if count > 0:
-            self.print_output(_.get('option_deleted', arg))
-        else:
+        config_type = self.db_manager.check_type(arg)
+        if config_type is None:
             self.print_error(_.get('option_not_found', arg))
+            return
+        elif config_type == '0':
+            self.print_error(_.get('delopt_error'))
+            return
+        else:
+            count = self.db_manager.delete_option(arg)
+            if count > 0:
+                self.print_output(_.get('option_deleted', arg))
     
     def cmd_select(self, arg):
         if arg:
