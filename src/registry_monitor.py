@@ -1,3 +1,4 @@
+import time
 import ctypes
 import winreg
 import logging
@@ -32,8 +33,9 @@ class RegistryMonitor:
     def start_monitoring(self):
         # 打开注册表项
         self.hkey = self._open_registry_key(self.registry_type, self.registry_path)
-        if self.hkey is None:
-            return
+        while self.hkey is None:
+            time.sleep(5)
+            self.hkey = self._open_registry_key(self.registry_type, self.registry_path)
         # 开始监听注册表项的变化
         self.logger.info(I18n.get("START_REGISTRY_MONITORING", self.hkey))
         self._monitor_registry_change()

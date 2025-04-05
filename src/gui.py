@@ -97,14 +97,22 @@ class ProxyGUI:
                                         self.output_text.see(tk.END)
                                     self.output_text.config(state=tk.DISABLED)
                         except Exception as e:
-                            self.logger.exception(I18n.get("pipe_read_error", str(e)))
+                            if e.args[0] == 109: # 管道已结束
+                                self.logger.info(e.args[-1])
+                            else:
+                                self.logger.exception(I18n.get("pipe_read_error", str(e)))
                             break
             except Exception as e:
-                self.logger.exception(I18n.get("pipe_connect_error", str(e)))
+                if e.args[0] == 232: # 管道正在被关闭
+                    self.logger.info(e.args[-1])
+                else:
+                    self.logger.exception(I18n.get("pipe_connect_error", str(e)))
             finally:
                 if self.pipe:
                     win32file.CloseHandle(self.pipe)
                 self.logger.info(I18n.get("pipe_closed"))
+                if self.running:
+                    threading.Thread(target=listen_for_messages, name="listen-message").start()
         threading.Thread(target=listen_for_messages, name="listen-message").start()
 
     def scroll_event(self, *args):

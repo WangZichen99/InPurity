@@ -1,0 +1,147 @@
+import json
+import datetime
+import os
+import random
+import base64
+
+def generate_random_string(length):
+    """生成随机字符串"""
+    characters = string.ascii_letters + string.digits + string.punctuation
+    return ''.join(random.choice(characters) for i in range(length))
+
+def generate_random_bytes(length):
+    """生成随机字节"""
+    return os.urandom(length)
+
+def xor_encrypt(data, key):
+    """异或加密"""
+    key_bytes = key.encode('utf-8')
+    key_length = len(key_bytes)
+    encrypted = bytearray()
+    for i, char in enumerate(data):
+        encrypted.append(char ^ key_bytes[i % key_length])
+    return bytes(encrypted)
+
+class Record:
+    def __init__(self, mode, start_time, duration, end_time, cache_set):
+        self.mode = mode
+        self.start_time = start_time
+        self.duration = duration
+        self.end_time = end_time
+        self.cache_set = cache_set
+
+    def to_dict(self):
+        return {
+            "mode": self.mode,
+            "start_time": self.start_time,
+            "duration": self.duration,
+            "end_time": self.end_time,
+            "cache_set": self.cache_set
+        }
+
+    def to_json(self):
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+RECORD_SEPARATOR = "||==SEPERATOR==||"  # 记录分隔符
+ENCRYPTION_KEY = "MySuperSecretKey"  # 加密密钥
+def write_record(file_path, record):
+    """写入记录到文件"""
+    try:
+        record_json = record.to_json()
+        encrypted_record = xor_encrypt(record_json.encode('utf-8'), ENCRYPTION_KEY)
+
+        # Base64 编码
+        encoded_record = base64.b64encode(encrypted_record).decode('utf-8')
+
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(encoded_record + RECORD_SEPARATOR + "\n")
+        return True
+    except Exception as e:
+        print(f"写入记录失败: {e}")
+        return False
+
+def read_records(file_path):
+    """从文件中读取记录"""
+    records = []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                if RECORD_SEPARATOR in line:
+                    encoded_record, _ = line.split(RECORD_SEPARATOR, 1)
+                    try:
+                        # Base64 解码
+                        encrypted_record = base64.b64decode(encoded_record)
+                        decrypted_record = xor_encrypt(encrypted_record, ENCRYPTION_KEY).decode('utf-8')
+                        record_dict = json.loads(decrypted_record)
+                        record = Record(**record_dict)
+                        records.append(record)
+                    except Exception as e:
+                        print(f"解析记录失败: {e}")
+    except FileNotFoundError:
+        print("文件不存在")
+    except Exception as e:
+        print(f"读取文件失败: {e}")
+    return records
+
+def add_file_header(file_path, header_size=256):
+    """添加文件头"""
+    random_header = generate_random_bytes(header_size)
+    with open(file_path, "rb+") as f:
+        content = f.read()
+        f.seek(0, 0)
+        f.write(random_header)
+        f.write(content)
+
+def add_file_footer(file_path, footer_size=256):
+    """添加文件尾"""
+    random_footer = generate_random_bytes(footer_size)
+    with open(file_path, "ab") as f:
+        f.write(random_footer)
+
+import time
+import string
+
+# 定义要使用的文件名
+file_path = "runtime_data.log"
+# file_path = "data_store" # 无后缀名
+# file_path = "important.sys" # 伪装成系统文件
+if __name__ == "__main__":
+    # 清空文件内容
+    if os.path.exists(file_path):
+        open(file_path, 'w').close()
+
+    # 添加文件头和文件尾
+    add_file_header(file_path)
+    add_file_footer(file_path)
+
+    # 记录数据
+    start_time = datetime.datetime.now().strftime("%Y%m%d %H:%M:%S")
+    time.sleep(2)
+    end_time = datetime.datetime.now().strftime("%Y%m%d %H:%M:%S")
+    record1 = Record(
+        mode="images",
+        start_time=start_time,
+        duration=2,
+        end_time=end_time,
+        cache_set="set1"
+    )
+    write_record(file_path, record1)
+
+    start_time = datetime.datetime.now().strftime("%Y%m%d %H:%M:%S")
+    time.sleep(5)
+    end_time = datetime.datetime.now().strftime("%Y%m%d %H:%M:%S")
+    record2 = Record(
+        mode="requests",
+        start_time=start_time,
+        duration=5,
+        end_time=end_time,
+        cache_set="set2"
+    )
+    write_record(file_path, record2)
+
+    # 读取数据
+    records = read_records(file_path)
+    for record in records:
+        print(
+            f"Mode: {record.mode}, Start Time: {record.start_time}, Duration: {record.duration}, End Time: {record.end_time}, Cache Set: {record.cache_set}"
+        )

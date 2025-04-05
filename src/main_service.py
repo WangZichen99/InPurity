@@ -783,15 +783,15 @@ class InPurityService(win32serviceutil.ServiceFramework):
             proxy_port (int): 代理服务器端口
         """
         with FileLock(self.registry_paths['internet_value']):
-            with winreg.OpenKey(self.registry_paths['internet_key'], self.registry_paths['internet_value'], 0, winreg.KEY_ALL_ACCESS) as key:
-                try:
+            try:
+                with winreg.OpenKey(self.registry_paths['internet_key'], self.registry_paths['internet_value'], 0, winreg.KEY_ALL_ACCESS) as key:
                     winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
                     winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"127.0.0.1:{proxy_port}")
                     proxy_enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
                     proxy_server, _ = winreg.QueryValueEx(key, "ProxyServer")
                     self.logger.info(I18n.get("WIN_PROXY_SET", proxy_enable, proxy_server))
-                except Exception as e:
-                    self.logger.exception(I18n.get("WIN_PROXY_ERROR", e))
+            except Exception as e:
+                self.logger.exception(I18n.get("WIN_PROXY_ERROR", e))
 
     def start_mitmproxy(self):
         """
