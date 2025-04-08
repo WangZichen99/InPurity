@@ -55,7 +55,7 @@ _translations: Dict[str, Dict[str, str]] = {
             "FAILED_USER_CONTEXT": "Failed to get user PID: {}",  
             "MAX_WAIT_EXCEEDED": "Maximum wait time exceeded (10 minutes) when getting user PID", 
             "SESSION_NOT_ACTIVE": "Process ID {} is not the active session", 
-            "CONFIG_CONVERT_ERROR": "Error converting configuration item {}: {}", 
+            "CONFIG_CONVERT_ERROR": "Error converting configuration item {}: {}",
             "THREAD_STARTED": "Thread {} started",
             "THREAD_STOP_TIMEOUT": "Thread {} did not terminate within timeout",       
 
@@ -201,6 +201,11 @@ _translations: Dict[str, Dict[str, str]] = {
             "DOMAIN_BLACKLISTED": "Domain {} has been added to blacklist.\n",
             "PROXY_SERVICE_STOPPED": "Proxy service stopped, resources cleaned up",
             "START_FORBID": "Strictly forbidden! Dangerous visits: {}, forbidden mode: {}, duration: {}min",
+            "RESET_FORBID": "Forbid mode '{}' has been reset",
+            "ACTIVE_FORBID_FOUND": "Active forbid event found. Mode: {}, remaining time: {}min",
+            "FORBID_EVENT_CHECK_ERROR": "Error checking forbid events: {}",
+            "BLACKLIST_CACHE_REFRESH_PAUSED": "Blacklist cache refresh has been paused",
+            "BLACKLIST_CACHE_REFRESH_RESUMED": "Blacklist cache refresh has been resumed",
 
             # monitor
             "START_REGISTRY_MONITORING": "Start monitoring {}",
@@ -448,9 +453,14 @@ _translations: Dict[str, Dict[str, str]] = {
             "IMAGE_PROCESS_TIMEOUT": "图像处理超时: {}",
             "UNRECOGNIZED_IMAGE": "无法识别的图像文件: {}",
             "IMAGE_PROCESS_ERROR": "处理图像时发生错误: {}",
-            "DOMAIN_BLACKLISTED": "域名 {} 已加入黑名单.\n",
-            "PROXY_SERVICE_STOPPED": "代理服务关闭，资源已清理",
-            "START_FORBID": "开始严格禁止！危险访问次数：{}，禁止模式：{}， 禁止时长：{}分钟",
+            "DOMAIN_BLACKLISTED": "域名 {} 已添加到黑名单。\n",
+            "PROXY_SERVICE_STOPPED": "代理服务已停止，资源已清理",
+            "START_FORBID": "严格禁止！危险访问：{}次，禁止模式：{}，持续时间：{}分钟",
+            "RESET_FORBID": "禁止模式 '{}' 已重置",
+            "ACTIVE_FORBID_FOUND": "发现活跃的禁止事件。模式：{}，剩余时间：{}分钟",
+            "FORBID_EVENT_CHECK_ERROR": "检查禁止事件时出错：{}",
+            "BLACKLIST_CACHE_REFRESH_PAUSED": "黑名单缓存刷新已暂停",
+            "BLACKLIST_CACHE_REFRESH_RESUMED": "黑名单缓存刷新已恢复",
 
             # monitor
             "START_REGISTRY_MONITORING": "开始监听 {}",

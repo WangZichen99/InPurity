@@ -13,6 +13,7 @@ from threading import Timer
 from urllib.parse import urlparse
 from ai_detect import ImagePredictor
 from db_manager import DatabaseManager
+from forbid_manager import ForbidEventManager
 from PIL import Image, UnidentifiedImageError
 from constants import (STREAMING_TYPES, SKIP_CONTENT_TYPES, IMAGE_EXTENSIONS)
 
@@ -36,12 +37,50 @@ class InPurityProxy:
         self.blacklist_cache = set()  # 使用集合存储黑名单，提高查询效率
         self.blacklist_lock = threading.Lock()  # 用于保护黑名单缓存的线程锁
         self.CACHE_REFRESH_INTERVAL = 300  # 缓存刷新间隔（秒）
+        self.cache_refresh_paused = False  # 缓存刷新暂停标志
         
         # 站点统计相关的线程锁
         self.stats_lock = threading.Lock()  # 用于保护站点统计数据的线程锁
         
+        # 初始化禁止事件管理器
+        self.forbid_manager = ForbidEventManager()
+        
         self._init_blacklist_cache()  # 初始化黑名单缓存
+        self._check_active_forbid_events()  # 检查活跃的禁止事件
         self._start_cache_refresh_timer()  # 启动定时刷新
+    
+    def _check_active_forbid_events(self):
+        """检查是否有活跃的禁止事件"""
+        try:
+            self.forbid_manager.clear_expired_events()
+            active_event = self.forbid_manager.get_active_forbid_event()
+            if active_event:
+                # 设置禁止标志
+                mode = active_event['mode']
+                if mode == "images":
+                    self.img_forbid = True
+                elif mode == "requests":
+                    self.req_forbid = True
+                
+                # 恢复黑名单缓存快照
+                with self.blacklist_lock:
+                    self.blacklist_cache = active_event['cache_set']
+                
+                # 恢复危险计数
+                self.dangerous_count = active_event.get('count', 0)
+                
+                # 暂停黑名单缓存刷新
+                self.cache_refresh_paused = True
+                
+                # 设置定时器在禁止事件结束后恢复
+                remaining_time = active_event['end_time'] - time.time()
+                if remaining_time > 0:
+                    self.logger.info(I18n.get("ACTIVE_FORBID_FOUND", mode, int(remaining_time / 60)))
+                    self.forbid_timer = Timer(remaining_time, self.reset_forbid, (mode,))
+                    self.forbid_timer.daemon = True
+                    self.forbid_timer.start()
+        except Exception as e:
+            self.logger.error(I18n.get("FORBID_EVENT_CHECK_ERROR", str(e)))
     
     def _init_blacklist_cache(self):
         """初始化黑名单缓存"""
@@ -58,6 +97,10 @@ class InPurityProxy:
     def _refresh_blacklist_cache(self):
         """刷新黑名单缓存"""
         try:
+            # 如果刷新被暂停，则跳过
+            if self.cache_refresh_paused:
+                return
+                
             with self.blacklist_lock:
                 # 使用参数化查询和索引提高查询效率
                 result = self.db_manager.fetchall("SELECT host FROM black_site")
@@ -78,6 +121,17 @@ class InPurityProxy:
         
         refresh_thread = threading.Thread(target=refresh_task, daemon=True)
         refresh_thread.start()
+    
+    def pause_cache_refresh(self):
+        """暂停黑名单缓存刷新"""
+        self.cache_refresh_paused = True
+        self.logger.info(I18n.get("BLACKLIST_CACHE_REFRESH_PAUSED"))
+    
+    def resume_cache_refresh(self):
+        """恢复黑名单缓存刷新"""
+        self.cache_refresh_paused = False
+        self._refresh_blacklist_cache()  # 立即执行一次刷新
+        self.logger.info(I18n.get("BLACKLIST_CACHE_REFRESH_RESUMED"))
     
     def md5_hash(self, text):
         """
@@ -121,13 +175,21 @@ class InPurityProxy:
         if self.is_blacklisted(main_domain):
             flow.kill()
             self.logger.info(I18n.get("BLACKLIST_URL_INTERCEPTED", flow.request.url))
+            return
+        raw_referer = flow.request.headers.get("Referer", None)
+        if raw_referer is not None:
+            raw_referer = urlparse(raw_referer)
+            referer = f"{raw_referer.scheme}://{raw_referer.netloc}/"
+            if self.is_blacklisted(referer):
+                flow.kill()
+                return
 
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         content_type = flow.response.headers.get("Content-Type", "").lower()
         if self.img_forbid and (self._is_image_request(flow, content_type) or ("video" in content_type or "octet-stream" in content_type) or 
                                 ("bilibili" in flow.request.url and "player" in flow.request.url)):
             flow.kill()
-            return           
+            return
         # 根据内容类型判断是否需要流式处理
         if any(content_type.startswith(t) for t in STREAMING_TYPES):
             flow.response.stream = True
@@ -251,26 +313,56 @@ class InPurityProxy:
                 timer.cancel()
 
     def set_forbid(self):
-        def reset_forbid(mode):
-            if mode == "images":
-                self.img_forbid = False
-            elif mode == "requests":
-                self.req_forbid = False
+        """设置禁止标识"""
+        # 取消已有的定时器
         if self.forbid_timer is not None and self.forbid_timer.is_alive():
             self.forbid_timer.cancel()
+        
+        # 根据危险次数确定禁止模式和时长
         if self.dangerous_count > 0 and self.dangerous_count <= 3:
             mode = "images"
             self.img_forbid = True
-            interval = self.dangerous_count * 10 * 60
+            interval = self.dangerous_count * 10 * 60  # 10-30分钟
         elif self.dangerous_count > 3:
             mode = "requests"
             self.img_forbid = False
             self.req_forbid = True
-            interval = self.dangerous_count * 30 * 60
-        self.forbid_timer = Timer(interval, reset_forbid, (mode,))
+            interval = self.dangerous_count * 30 * 60  # 2小时以上
+        
+        # 创建定时器，在指定时间后恢复
+        self.forbid_timer = Timer(interval, self.reset_forbid, (mode,))
         self.forbid_timer.daemon = True
         self.forbid_timer.start()
+        
+        # 记录当前时间作为开始时间
+        start_time = time.time()
+        
+        # 暂停黑名单缓存刷新
+        self.pause_cache_refresh()
+        
+        # 保存禁止事件信息到文件
+        with self.blacklist_lock:
+            # 创建黑名单缓存的快照
+            cache_snapshot = self.blacklist_cache.copy()
+            # 保存事件信息，包含危险计数
+            self.forbid_manager.save_forbid_event(mode, start_time, interval, cache_snapshot, self.dangerous_count)
+        
         self.logger.info(I18n.get("START_FORBID", self.dangerous_count, mode, interval // 60))
+    
+    def reset_forbid(self, mode):
+        """重置禁止标识"""
+        if mode == "images":
+            self.img_forbid = False
+        elif mode == "requests":
+            self.req_forbid = False
+        
+        # 恢复黑名单缓存刷新
+        self.resume_cache_refresh()
+        
+        # 清理过期的禁止事件
+        self.forbid_manager.clear_expired_events()
+        
+        self.logger.info(I18n.get("RESET_FORBID", mode))
 
     def add_to_blacklist(self, host):
         """将域名添加到黑名单数据库和缓存"""

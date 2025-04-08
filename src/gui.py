@@ -8,6 +8,7 @@ from i18n import I18n
 from log import LogManager
 from constants import ICON_PATH
 from tkinter import scrolledtext
+from concurrent.futures import ThreadPoolExecutor
 
 class ProxyGUI:
     def __init__(self):
@@ -20,6 +21,8 @@ class ProxyGUI:
         self.running = True
         self.auto_scroll = True
         self.pipe = None
+        self.rebuild_lock = threading.Lock()
+        self.executor = ThreadPoolExecutor(max_workers=2)
         self.setup_ui()
         self.create_pipe()
         
@@ -61,21 +64,24 @@ class ProxyGUI:
         self.window.after(0, self.run_tray_icon)
 
     def create_pipe(self):
-        try:
-            self.pipe = win32pipe.CreateNamedPipe(
-                r"\\.\pipe\GUIPipe",  # 管道的名称
-                win32pipe.PIPE_ACCESS_INBOUND,  # 只允许客户端向管道写数据
-                win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT,  # 管道类型
-                1,  # 最大连接数
-                65536,  # 输出缓冲区大小
-                65536,  # 输入缓冲区大小
-                0,  # 默认超时
-                None
-            )
-            self.logger.info(I18n.get("pipe_created"))
-            self.listen_thread()
-        except Exception as e:
-            self.logger.exception(I18n.get("pipe_create_error", str(e)))
+        with self.rebuild_lock:
+            if self.pipe:
+                return
+            try:
+                self.pipe = win32pipe.CreateNamedPipe(
+                    r"\\.\pipe\GUIPipe",  # 管道的名称
+                    win32pipe.PIPE_ACCESS_INBOUND,  # 只允许客户端向管道写数据
+                    win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT,  # 管道类型
+                    1,  # 最大连接数
+                    65536,  # 输出缓冲区大小
+                    65536,  # 输入缓冲区大小
+                    0,  # 默认超时
+                    None
+                )
+                self.logger.info(I18n.get("pipe_created"))
+                self.listen_thread()
+            except Exception as e:
+                self.logger.exception(I18n.get("pipe_create_error", str(e)))
 
     def listen_thread(self):
         def listen_for_messages():
@@ -110,10 +116,11 @@ class ProxyGUI:
             finally:
                 if self.pipe:
                     win32file.CloseHandle(self.pipe)
+                    self.pipe = None
                 self.logger.info(I18n.get("pipe_closed"))
                 if self.running:
-                    threading.Thread(target=listen_for_messages, name="listen-message").start()
-        threading.Thread(target=listen_for_messages, name="listen-message").start()
+                    self.executor.submit(self.create_pipe)
+        self.executor.submit(listen_for_messages)
 
     def scroll_event(self, *args):
         """
@@ -154,6 +161,7 @@ class ProxyGUI:
         self.running = False
         if self.tray_icon:
             self.tray_icon.stop()
+        self.executor.shutdown(wait=False)
         if self.window:
             self.window.quit()
             self.window.destroy()

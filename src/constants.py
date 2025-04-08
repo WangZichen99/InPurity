@@ -16,6 +16,7 @@ if getattr(sys, 'frozen', False):
     CONFIG_PATH = os.path.join(BASE_DIR, 'proxy_config\\')
     # run_mitmdump 路径
     RUN_MITMDUMP_PATH = os.path.join(BASE_DIR, 'run_mitmdump')
+    IMNATSEKR_PATH = os.path.join(RUN_MITMDUMP_PATH, '_internal', '_intercept.pyd')
     MITMDUMP_PATH = os.path.join(RUN_MITMDUMP_PATH, 'run_mitmdump.exe')
     # GUI
     GUI_DIR_PATH = os.path.join(BASE_DIR, 'gui')
@@ -34,7 +35,9 @@ else:
     CONFIG_PATH = os.path.join(BASE_DIR, 'target\\dist\\proxy_config\\')
     # mitmdump 路径
     # MITMDUMP_PATH = os.path.join(BASE_DIR, '.venv\\Scripts\\mitmdump.exe')
-    MITMDUMP_PATH = os.path.join(BASE_DIR, 'target\\dist\\run_mitmdump\\run_mitmdump.exe')
+    RUN_MITMDUMP_PATH = os.path.join(BASE_DIR, 'target\\dist\\run_mitmdump')
+    IMNATSEKR_PATH = os.path.join(RUN_MITMDUMP_PATH, '_internal', '_intercept.pyd')
+    MITMDUMP_PATH = os.path.join(RUN_MITMDUMP_PATH, 'run_mitmdump.exe')
     SCRIPT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'proxy_mitm.py')
     # GUI
     GUI_DIR_PATH = os.path.join(BASE_DIR, 'target\\dist\\gui')
