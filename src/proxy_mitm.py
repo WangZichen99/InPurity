@@ -247,14 +247,32 @@ class InPurityProxy:
                 with self.stats_lock:
                     # 检查 referer 是否仍然存在（可能已被清理）
                     if referer not in self.site_stats:
-                        self.site_stats[referer] = {"root": referer_root, "total_images": 0, "problematic_images": 0}
+                        self.site_stats[referer] = {
+                            "root": referer_root, 
+                            "total_images": 0, 
+                            "problematic_images": 0,
+                            "features": set()  # 只保留问题图像特征
+                        }
                     
                     # 更新总图片数
                     self.site_stats[referer]["total_images"] += 1
                     
                     # 如果检测到问题图片，更新统计
                     if predict_result and predict_result != "No Module File":
-                        self.site_stats[referer]["problematic_images"] += 1
+                        # 生成图像特征签名
+                        url_parts = urlparse(flow.request.url).path.split('/')
+                        filename = url_parts[-1] if url_parts else ""
+                        width, height = img.size
+                        image_feature = f"{width}x{height}_{filename}"
+                        
+                        # 检查是否已经记录过这个问题图像
+                        if image_feature not in self.site_stats[referer]["features"]:
+                            self.site_stats[referer]["problematic_images"] += 1
+                            self.site_stats[referer]["features"].add(image_feature)
+                        else:
+                            # 如果是已知的问题图像，减少总计数以抵消重复
+                            self.site_stats[referer]["total_images"] -= 1
+                        
                         flow.response.status_code = 403
                         flow.response.content = b"Forbidden"
                         self.logger.info(I18n.get("IMAGE_URL_INTERCEPTED", flow.request.url, referer))
