@@ -29,7 +29,8 @@ from registry_monitor import RegistryMonitor
 from constants import (MITMDUMP_PATH, MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, 
                        SCRIPT_PATH, SERVICE_SUB_KEY, GUI_PATH, SYSTEM_PROCESSES,
                        SERVICE_HOST, GUI_PIPE_NAME, RANDOM_PORT_MIN, RANDOM_PORT_MAX,
-                       DEFAULT_THREAD_TIMEOUT, MAX_USER_WAIT_SECONDS, EXPECTED_VALUES)
+                       DEFAULT_THREAD_TIMEOUT, MAX_USER_WAIT_SECONDS, EXPECTED_VALUES, 
+                       SERVICE_MONITOR_INTERVAL)
 
 class InPurityService(win32serviceutil.ServiceFramework):
     _svc_name_ = MAIN_SERVICE_NAME
@@ -73,7 +74,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
             self.registry_paths['service_value'],
             SERVICE_SUB_KEY,
             self.service_start_change,
-            60000,
+            SERVICE_MONITOR_INTERVAL,
             self.logger)
         self.service_reg_monitor_thread = None
         self.running = True

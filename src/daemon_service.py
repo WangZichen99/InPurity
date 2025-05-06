@@ -270,7 +270,7 @@ class DaemonService(win32serviceutil.ServiceFramework):
         """
         try:
             scm = win32service.OpenSCManager(None, None, win32service.SC_MANAGER_ALL_ACCESS)
-            service = win32service.OpenService(scm, DAEMON_SERVICE_NAME, win32service.SERVICE_ALL_ACCESS)
+            service = win32service.OpenService(scm, MAIN_SERVICE_NAME, win32service.SERVICE_ALL_ACCESS)
             if new_values.get("Start", "") != EXPECTED_VALUES["Start"]:
                 self.logger.info(I18n.get("SVC_SETTINGS_CHANGED", new_values))
                 win32service.ChangeServiceConfig(
@@ -281,8 +281,8 @@ class DaemonService(win32serviceutil.ServiceFramework):
         except Exception as e:
             self.logger.exception(I18n.get("MAIN_SVC_CONFIG_ERROR", str(e)))
         finally:
-                win32service.CloseServiceHandle(service)
-                win32service.CloseServiceHandle(scm)
+            win32service.CloseServiceHandle(service)
+            win32service.CloseServiceHandle(scm)
 
     def on_registry_change(self, new_values):
         """
