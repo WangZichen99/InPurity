@@ -221,6 +221,7 @@ class InPurityProxy:
         
         parsed_url = urlparse(referer)
         referer_root = f"{parsed_url.scheme}://{parsed_url.netloc}/"
+        referer = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
             
         try:
             # 处理图片数据
