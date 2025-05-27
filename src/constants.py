@@ -79,6 +79,9 @@ SKIP_CONTENT_TYPES = {
     'video/', 'application/wasm'
 }
 
+#文本类型
+TEXT_CONTENT_TYPES = {"text/html", "text/plain"}
+
 # 图片相关常量
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff', '.avif'}
 IMAGE_CONTENT_TYPES = {
@@ -126,3 +129,25 @@ DAEMON_SERVICE_CHECK_DELAY = 10  # 守护服务初始检查延迟（秒）
 INTERNET_MONITOR_INTERVAL = 10000  # 互联网设置监控间隔（毫秒）
 SERVICE_MONITOR_INTERVAL = 60000  # 服务设置监控间隔（毫秒）
 SERVICE_AUTO_START = 0x00000002  # 服务自动启动类型
+
+PORN_WORDS_CN = [
+    "5aWz5ZCM", "LuS5sw==", "5b6u6IOW", "5bC7", "5bGM", "5Lq65aa7", "LuWmhw==", 
+    "6aqa", "LuWlsw==", "5Lid6KKc", "6KOk6KKc", "6buR5Lid", "5Lid6YeM5Lid", "6IKJ5oSf", 
+    "5Liw5ruh", "5YaF6KGj", "6IeA", "5rer", "5r2u5ZC5", "57K+5ray", "57K+5a2Q", "5Lmx5Lym", 
+    "6IKJ5qOS", "57Sn6Lqr", "55Gc5Ly96KOk", "6L+e5L2T", "5ZCK5bim", "5oiY6KGj", "5oiY6KKN", 
+    "5oOF6Laj", "LuavjQ==", "6a2F6a2U", "LuWmiA==", "6Lez6JuL", "5oyJ5pGp", "5oCn5oSf", "6IKJ5ryr", 
+    "6Ieq5oWw", "LueptA==", "LuWluA==", "6aOe5py65p2v", "54ylLg==", "6JW+5Lid", "5bm76b6Z", 
+    "5riU572R", "LuWltA==", "5rex5ZaJ", "5Y+j5Lqk", "6Laz5Lqk", "5YG35oOF", "57qm54Ku", "5YWo6KO4", 
+    "6aWl5ri0", "5Ye66L2o", "56eB5oi/", "54af6b6E", "6L2m6ZyH", "5Y+M6aOe", "6Imy5oOF", "5oOF6Imy", 
+    "5YGa54ix", "6buR6ay8", "6buR5Lq6", "6bih5be0", "5Lmz5Lqk", "5beo5qOS", "54K46KOCLis=",
+    "5rij55S3", "5ZCD55Oc", "6buR5paZ", "54iG5paZ", "5oqW6Z+z", "5b+r5omL", "572R57qi", "56aP5Yip5aes", 
+    "5aGM5oi/", "6b6f5aS0", "5Lit5Ye6", "5aup5aa5", "5p6B5ZOB", "56C05aSE", "5pK4566h", "5aSE5aWz", 
+    "5YaF5bCE", "5LiB5a2X6KOk", "55S35qih", "5omT5qGp5py6", "6YeN5Y+j", "56eB5a+G", "5q+N54uX", 
+    "57Sg5Lq6", "5Yi25pyN", "5Lmx5Lqk", "6IKP",
+]
+
+PORN_WORDS_EN = [
+    "cG9ybg==", "c2V4", "bnVkZQ==", "YXNz", "ZGljaw==", "dGl0cw==", "bWlsZg==",
+    "Y3Vt", "Z2F5", "YmJ3", "b3JnYXNt", "YW5hbA==", "Ymxvd2pvYg==", "aGFuZGpvYg==", 
+    "bGVzYmlhbg==", "cHVzc3k=", "Y3Vtc2hvdA==", "ZnVjaw==", "ZnVja2luZw==", "aGVudGFp",
+] 

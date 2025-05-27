@@ -206,6 +206,7 @@ _translations: Dict[str, Dict[str, str]] = {
             "FORBID_EVENT_CHECK_ERROR": "Error checking forbid events: {}",
             "BLACKLIST_CACHE_REFRESH_PAUSED": "Blacklist cache refresh has been paused",
             "BLACKLIST_CACHE_REFRESH_RESUMED": "Blacklist cache refresh has been resumed",
+            "SENSITIVE_SEARCH_BLOCKED": "sensitive search blocked",
 
             # monitor
             "START_REGISTRY_MONITORING": "Start monitoring {}",
@@ -461,6 +462,7 @@ _translations: Dict[str, Dict[str, str]] = {
             "FORBID_EVENT_CHECK_ERROR": "检查禁止事件时出错：{}",
             "BLACKLIST_CACHE_REFRESH_PAUSED": "黑名单缓存刷新已暂停",
             "BLACKLIST_CACHE_REFRESH_RESUMED": "黑名单缓存刷新已恢复",
+            "SENSITIVE_SEARCH_BLOCKED": "敏感词拦截",
 
             # monitor
             "START_REGISTRY_MONITORING": "开始监听 {}",

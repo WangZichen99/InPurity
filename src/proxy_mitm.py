@@ -1,3 +1,4 @@
+import re
 import time
 import base64
 import hashlib
@@ -10,12 +11,13 @@ from datetime import date
 from mitmproxy import http
 from log import LogManager
 from threading import Timer
-from urllib.parse import urlparse
 from ai_detect import ImagePredictor
 from db_manager import DatabaseManager
 from forbid_manager import ForbidEventManager
 from PIL import Image, UnidentifiedImageError
-from constants import (STREAMING_TYPES, SKIP_CONTENT_TYPES, IMAGE_EXTENSIONS)
+from urllib.parse import urlparse, parse_qs
+from constants import (STREAMING_TYPES, SKIP_CONTENT_TYPES, IMAGE_EXTENSIONS, 
+                      TEXT_CONTENT_TYPES, PORN_WORDS_CN, PORN_WORDS_EN)
 
 class InPurityProxy:
     def __init__(self):
@@ -38,6 +40,12 @@ class InPurityProxy:
         self.blacklist_lock = threading.Lock()  # 用于保护黑名单缓存的线程锁
         self.CACHE_REFRESH_INTERVAL = 300  # 缓存刷新间隔（秒）
         self.cache_refresh_paused = False  # 缓存刷新暂停标志
+
+        # 预解码敏感词并转换为Set
+        self.sensitive_words_cn = set()
+        self.sensitive_words_en = set()
+        self.blocked_words = set()
+        self._preload_sensitive_words()
         
         # 站点统计相关的线程锁
         self.stats_lock = threading.Lock()  # 用于保护站点统计数据的线程锁
@@ -70,7 +78,7 @@ class InPurityProxy:
                 self.dangerous_count = active_event.get('count', 0)
                 
                 # 暂停黑名单缓存刷新
-                self.cache_refresh_paused = True
+                self.pause_cache_refresh()
                 
                 # 设置定时器在禁止事件结束后恢复
                 remaining_time = active_event['end_time'] - time.time()
@@ -133,6 +141,24 @@ class InPurityProxy:
         self._refresh_blacklist_cache()  # 立即执行一次刷新
         self.logger.info(I18n.get("BLACKLIST_CACHE_REFRESH_RESUMED"))
     
+    def _preload_sensitive_words(self):
+        """预加载和解码敏感词到内存中"""
+        # 加载中文敏感词
+        for encoded_word in PORN_WORDS_CN:
+            try:
+                word = base64.b64decode(encoded_word).decode('utf-8')
+                self.sensitive_words_cn.add(word)
+            except Exception as e:
+                self.logger.exception(I18n.get("ERROR", e))
+        
+        # 加载英文敏感词
+        for encoded_word in PORN_WORDS_EN:
+            try:
+                word = base64.b64decode(encoded_word).decode('utf-8').lower()
+                self.sensitive_words_en.add(word)
+            except Exception as e:
+                self.logger.exception(I18n.get("ERROR", e))
+
     def md5_hash(self, text):
         """
         计算字符串的 MD5 哈希值
@@ -186,14 +212,71 @@ class InPurityProxy:
 
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         content_type = flow.response.headers.get("Content-Type", "").lower()
-        if self.img_forbid and (self._is_image_request(flow, content_type) or ("video" in content_type or "octet-stream" in content_type) or 
-                                ("bilibili" in flow.request.url and "player" in flow.request.url)):
+        # 检查搜索内容
+        if any(content_type.startswith(type) for type in TEXT_CONTENT_TYPES):
+            search_term = self._extract_and_decode_search_params(flow.request.url)
+            before = len(self.blocked_words)
+            if search_term and self._contains_sensitive_keywords(search_term):
+                self.logger.info(I18n.get("SENSITIVE_SEARCH_BLOCKED"))
+                flow.kill()
+                after = len(self.blocked_words)
+                if after > before:
+                    self.dangerous_count += 1
+                    self.set_forbid()
+                return
+        # 图像流媒体拦截
+        if self.img_forbid and (self._is_image_request(flow, content_type) or 
+                               ("video" in content_type or "octet-stream" in content_type) or 
+                               ("bilibili" in flow.request.url and "player" in flow.request.url)):
             flow.kill()
             return
         # 根据内容类型判断是否需要流式处理
         if any(content_type.startswith(t) for t in STREAMING_TYPES):
             flow.response.stream = True
             self.logger.info(I18n.get("STREAM_DATA_DETECTED", content_type))
+
+    def _extract_and_decode_search_params(self, url: str) -> str:
+        """提取URL中的查询参数并正确解码，包括多次编码的情况"""
+        parsed_url = urlparse(url)
+        query_params = parse_qs(parsed_url.query)
+        # 常见搜索参数名称
+        search_params = ['q', 'query', 'wd', 'word', 'keyword', 'kw', 'text', 'search', 'p']
+        # 提取可能的搜索参数
+        for param in search_params:
+            if param in query_params:
+                value = query_params[param][0]
+                return value
+        # 如果没有找到常见搜索参数，则检查所有参数值
+        # for param, values in query_params.items():
+        #     for value in values:
+        #         decoded_value = self._deep_url_decode(value)
+        #         # 如果解码后的值包含中文，可能是搜索词
+        #         if self._contains_chinese(decoded_value):
+        #             return decoded_value
+        return ""
+    
+    def _contains_sensitive_keywords(self, search_term: str) -> bool:
+        """检查搜索词是否包含敏感关键词"""
+        if not search_term:
+            return False
+        
+        chinese_word_pattern = re.compile(r'[\u4e00-\u9fff]+')
+        english_word_pattern = re.compile(r'[a-zA-Z]+')
+        chinese_term = chinese_word_pattern.findall(search_term)
+        english_term = english_word_pattern.findall(search_term)
+
+        if chinese_term:
+            for term in chinese_term:
+                for word in self.sensitive_words_cn:
+                    if re.search(word, term):
+                        self.blocked_words.add(term)
+                        return True
+        if english_term:
+            for term in english_term:
+                if term.lower() in self.sensitive_words_en:
+                    self.blocked_words.add(term)
+                    return True
+        return False
 
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.response.status_code == 200:
@@ -380,6 +463,9 @@ class InPurityProxy:
         
         # 清理过期的禁止事件
         self.forbid_manager.clear_expired_events()
+
+        # 清理拦截搜索词
+        self.blocked_words.clear()
         
         self.logger.info(I18n.get("RESET_FORBID", mode))
 
