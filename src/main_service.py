@@ -757,8 +757,9 @@ class InPurityService(win32serviceutil.ServiceFramework):
         Returns:
             dict: 包含注册表键和值路径的字典
         """
-        self.username = self.db_manager.get_config("username")
-        self.sid = self.db_manager.get_config("sid")
+        self.username = win32api.GetUserName()
+        sid, _, _ = win32security.LookupAccountName(None, self.username)
+        self.sid = win32security.ConvertSidToStringSid(sid)
         self.logger.info(f"username：{self.username}")
         self.logger.info(f"sid：{self.sid}")
         key_type = winreg.HKEY_USERS if self.sid else winreg.HKEY_CURRENT_USER

@@ -8,6 +8,5 @@ Pillow==11.1.0
 prompt_toolkit==3.0.48
 psutil==6.0.0
 pystray==0.19.5
-pywin32==307
 pywin32==308
 streamlit==1.43.2

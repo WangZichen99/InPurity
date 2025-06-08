@@ -54,7 +54,7 @@ class CertificateInstaller:
             self._installation_lock = True
             self.install_certificate()
             self.add_config_path_to_system_env()
-            self.get_user_sid()
+            # self.get_user_sid()
             self.setup_or_update_keys()
             await asyncio.gather(self.remove_service(DAEMON_SERVICE_NAME), self.remove_service(MAIN_SERVICE_NAME))
             result = await asyncio.gather(

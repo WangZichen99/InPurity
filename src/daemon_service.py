@@ -2,10 +2,13 @@ import os
 import sys
 import time
 import winreg
+import win32net
 import threading
 import win32event
 import pywintypes
+import win32netcon
 import win32service
+import win32security
 import servicemanager
 from i18n import I18n
 import win32serviceutil
@@ -38,30 +41,23 @@ class DaemonService(win32serviceutil.ServiceFramework):
         self.security_manager = SecurityManager()
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.service_stop_event = win32event.CreateEvent(None, 0, 0, None)
-        self.registry_paths = self.get_user_sid()
+        self.registry_paths = self.get_users_with_internet_settings()
         self.running = True
         
-        # 初始化线程
-        self.internet_reg_monitor_thread = None
-        self.service_reg_monitor_thread = None
-        
         # 代理设置监控
-        self.internet_reg_monitor = RegistryMonitor(
-            self.registry_paths['internet_key'],
-            self.registry_paths['internet_value'],
-            INTERNET_SUB_KEY,
-            self.on_registry_change,
-            INTERNET_MONITOR_INTERVAL,
-            self.logger)
-        
-        # 服务设置监控
-        self.service_reg_monitor = RegistryMonitor(
-            self.registry_paths['service_key'],
-            self.registry_paths['service_value'],
-            SERVICE_SUB_KEY,
-            self.service_start_change,
-            SERVICE_MONITOR_INTERVAL,
-            self.logger)
+        self.monitor_threads = []
+        for reg_info in self.registry_paths:
+            self.monitor_threads.append({
+                "thread": None,
+                "monitor": RegistryMonitor(
+                    reg_info["reg_key"],
+                    reg_info["reg_value"],
+                    reg_info["sub_key"],
+                    reg_info["callback"],
+                    reg_info["interval"],
+                    self.logger
+                )
+            })
 
     def _start_thread(self, target, name, args=None):
         """
@@ -143,14 +139,12 @@ class DaemonService(win32serviceutil.ServiceFramework):
         self.running = False
         
         # 停止监控线程
-        self.internet_reg_monitor.stop_monitoring()
-        self._safely_stop_thread(self.internet_reg_monitor_thread)
-        
-        self.service_reg_monitor.stop_monitoring()
-        self._safely_stop_thread(self.service_reg_monitor_thread)
+        for mt in self.monitor_threads:
+            mt["monitor"].stop_monitoring()
+            self._safely_stop_thread(mt["thread"])
         
         # 清理资源
-        self.log_manager.cleanup(script_name='daemon_service')
+        self.log_manager.cleanup(script_name="daemon_service")
         win32event.SetEvent(self.service_stop_event)
         self.ReportServiceStatus(win32service.SERVICE_STOPPED)
 
@@ -176,17 +170,10 @@ class DaemonService(win32serviceutil.ServiceFramework):
         """
         # 删除token文件
         self.delete_token()
-        
         # 启动监控线程
-        self.internet_reg_monitor_thread = self._start_thread(
-            self.internet_reg_monitor.start_monitoring,
-            "internet-monitor"
-        )
-        
-        self.service_reg_monitor_thread = self._start_thread(
-            self.service_reg_monitor.start_monitoring,
-            "main-reg-monitor"
-        )
+        for i, mt in enumerate(self.monitor_threads):
+            thread_name = "main-reg-monitor" if i == 0 else f"internet-monitor-{i}"
+            mt["thread"] = self._start_thread(mt["monitor"].start_monitoring, thread_name)
 
     def _run_main_loop(self):
         """
@@ -231,21 +218,70 @@ class DaemonService(win32serviceutil.ServiceFramework):
                 self.logger.info(I18n.get("FILE_DELETED", TOKEN_PATH))
         except Exception as e:
             self.logger.error(I18n.get("FILE_DELETE_ERROR", str(e)))
-
-    def get_user_sid(self):
+    
+    def get_users_with_internet_settings(self):
         """
-        获取用户SID和相关注册表路径
+        获取系统中所有用户的 SID，检查是否存在对应的 Internet Settings 注册表项，
+        并返回格式化的注册表路径列表
+        """
+        resume_handle = 0
+        registry_paths = []
+        reg_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        registry_paths.append({
+            "reg_key": winreg.HKEY_LOCAL_MACHINE,
+            "reg_value": f"SYSTEM\\CurrentControlSet\\Services\{MAIN_SERVICE_NAME}",
+            "callback": self.service_start_change,
+            "sub_key": SERVICE_SUB_KEY,
+            "interval": SERVICE_MONITOR_INTERVAL
+        })
         
-        Returns:
-            dict: 包含注册表键和值路径的字典
-        """
-        reg_dic = {}
-        sid = self._get_config("sid")
-        reg_dic['internet_key'] = winreg.HKEY_USERS if sid else winreg.HKEY_CURRENT_USER
-        reg_dic['internet_value'] = f"{sid}\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" if sid else r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-        reg_dic['service_key'] = winreg.HKEY_LOCAL_MACHINE
-        reg_dic['service_value'] = f"SYSTEM\\CurrentControlSet\\Services\{MAIN_SERVICE_NAME}"
-        return reg_dic
+        try:
+            # 获取所有普通用户账户
+            while True:
+                users, _, resume_handle = win32net.NetUserEnum(
+                    None,  # 本地计算机
+                    0,     # 基本信息
+                    win32netcon.FILTER_NORMAL_ACCOUNT,  # 普通账户
+                    resume_handle,
+                    win32netcon.MAX_PREFERRED_LENGTH
+                )
+                
+                for user in users:
+                    username = user['name']
+                    try:
+                        # 获取用户的 SID
+                        sid, _, _ = win32security.LookupAccountName(None, username)
+                        sid_string = win32security.ConvertSidToStringSid(sid)
+                        # 检查该用户的 Internet Settings 注册表项是否存在
+                        try:
+                            # 尝试打开注册表项
+                            key = winreg.OpenKey(
+                                winreg.HKEY_USERS,
+                                f"{sid_string}\\{reg_path}",
+                                0,
+                                winreg.KEY_READ
+                            )
+                            winreg.CloseKey(key)
+                            # 如果成功打开，添加到结果列表
+                            registry_paths.append({
+                                "reg_key": winreg.HKEY_USERS,
+                                "reg_value": f"{sid_string}\\{reg_path}",
+                                "callback": self.on_registry_change,
+                                "sub_key": INTERNET_SUB_KEY,
+                                "interval": INTERNET_MONITOR_INTERVAL
+                            })
+                        except FileNotFoundError:
+                            pass
+                        except Exception as e:
+                            print(f"检查 SID {sid_string} 的注册表时出错: {e}")
+                    except Exception as e:
+                        print(f"处理用户 {username} 时出错: {e}")
+                if resume_handle == 0:
+                    break
+        except Exception as e:
+            print(f"获取用户列表时出错: {e}")
+        finally:
+            return registry_paths
 
     def get_proxy_port(self):
         """
