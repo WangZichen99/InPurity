@@ -30,7 +30,7 @@ from constants import (MITMDUMP_PATH, MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME,
                        SCRIPT_PATH, SERVICE_SUB_KEY, GUI_PATH, SYSTEM_PROCESSES,
                        SERVICE_HOST, GUI_PIPE_NAME, RANDOM_PORT_MIN, RANDOM_PORT_MAX,
                        DEFAULT_THREAD_TIMEOUT, MAX_USER_WAIT_SECONDS, EXPECTED_VALUES, 
-                       SERVICE_MONITOR_INTERVAL)
+                       SERVICE_MONITOR_INTERVAL, DEFAULT_CONFIG)
 
 class InPurityService(win32serviceutil.ServiceFramework):
     _svc_name_ = MAIN_SERVICE_NAME
@@ -637,7 +637,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
         """
         port_validator = lambda port: port and self.is_port_available(int(port))
         port_converter = int
-        socket_port = self._get_config("socket_port", None, port_validator, port_converter)
+        socket_port = self._get_config("socket_port", DEFAULT_CONFIG["socket_port"], port_validator, port_converter)
         
         if socket_port is None:
             # 找到可用端口
@@ -664,7 +664,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
         port_converter = int
         return self._get_config(
             "proxy_port", 
-            None,
+            DEFAULT_CONFIG["proxy_port"],
             port_validator,
             port_converter,
             I18n.get("PROXY_PORT_CHECK"),
@@ -683,7 +683,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
         
         return self._get_config(
             "upstream_enable",
-            False,
+            DEFAULT_CONFIG["upstream_enable"],
             None,
             bool_converter,
             None,
@@ -757,43 +757,43 @@ class InPurityService(win32serviceutil.ServiceFramework):
         Returns:
             dict: 包含注册表键和值路径的字典
         """
-        self.username = win32api.GetUserName()
-        sid, _, _ = win32security.LookupAccountName(None, self.username)
-        self.sid = win32security.ConvertSidToStringSid(sid)
-        self.logger.info(f"username：{self.username}")
-        self.logger.info(f"sid：{self.sid}")
-        key_type = winreg.HKEY_USERS if self.sid else winreg.HKEY_CURRENT_USER
-        if key_type == winreg.HKEY_USERS:
-            self.logger.info('key_type = HKEY_USERS')
-        elif key_type == winreg.HKEY_CURRENT_USER:
-            self.logger.info('key_type = HKEY_CURRENT_USER')
-        key_path = f"{self.sid}\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" if self.sid else r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-        self.logger.info(f"key_path = {key_path}")
+        # self.username = win32api.GetUserName()
+        # sid, _, _ = win32security.LookupAccountName(None, self.username)
+        # self.sid = win32security.ConvertSidToStringSid(sid)
+        # self.logger.info(f"username：{self.username}")
+        # self.logger.info(f"sid：{self.sid}")
+        # key_type = winreg.HKEY_USERS if self.sid else winreg.HKEY_CURRENT_USER
+        # if key_type == winreg.HKEY_USERS:
+        #     self.logger.info('key_type = HKEY_USERS')
+        # elif key_type == winreg.HKEY_CURRENT_USER:
+        #     self.logger.info('key_type = HKEY_CURRENT_USER')
+        # key_path = f"{self.sid}\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" if self.sid else r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+        # self.logger.info(f"key_path = {key_path}")
         reg_dic = {
-            "internet_key": key_type,
-            "internet_value": key_path,
+            # "internet_key": key_type,
+            # "internet_value": key_path,
             "service_key": winreg.HKEY_LOCAL_MACHINE,
             "service_value": f"SYSTEM\\CurrentControlSet\\Services\{DAEMON_SERVICE_NAME}"
         }
         return reg_dic
 
-    def setup_windows_proxy(self, proxy_port):
-        """
-        设置Windows系统代理
+    # def setup_windows_proxy(self, proxy_port):
+    #     """
+    #     设置Windows系统代理
         
-        Args:
-            proxy_port (int): 代理服务器端口
-        """
-        with FileLock(self.registry_paths['internet_value']):
-            try:
-                with winreg.OpenKey(self.registry_paths['internet_key'], self.registry_paths['internet_value'], 0, winreg.KEY_ALL_ACCESS) as key:
-                    winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
-                    winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"127.0.0.1:{proxy_port}")
-                    proxy_enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
-                    proxy_server, _ = winreg.QueryValueEx(key, "ProxyServer")
-                    self.logger.info(I18n.get("WIN_PROXY_SET", proxy_enable, proxy_server))
-            except Exception as e:
-                self.logger.exception(I18n.get("WIN_PROXY_ERROR", e))
+    #     Args:
+    #         proxy_port (int): 代理服务器端口
+    #     """
+    #     with FileLock(self.registry_paths['internet_value']):
+    #         try:
+    #             with winreg.OpenKey(self.registry_paths['internet_key'], self.registry_paths['internet_value'], 0, winreg.KEY_ALL_ACCESS) as key:
+    #                 winreg.SetValueEx(key, "ProxyEnable", 0, winreg.REG_DWORD, 1)
+    #                 winreg.SetValueEx(key, "ProxyServer", 0, winreg.REG_SZ, f"127.0.0.1:{proxy_port}")
+    #                 proxy_enable, _ = winreg.QueryValueEx(key, "ProxyEnable")
+    #                 proxy_server, _ = winreg.QueryValueEx(key, "ProxyServer")
+    #                 self.logger.info(I18n.get("WIN_PROXY_SET", proxy_enable, proxy_server))
+    #         except Exception as e:
+    #             self.logger.exception(I18n.get("WIN_PROXY_ERROR", e))
 
     def start_mitmproxy(self):
         """
@@ -847,8 +847,8 @@ class InPurityService(win32serviceutil.ServiceFramework):
             time.sleep(5)
             if self.mitmproxy_process.poll() is None:
                 self.logger.info(I18n.get("MITMDUMP_START_SUCCESS", proxy_port, I18n.get("ENABLE") if upstream_enable else I18n.get("DISABLE"), upstream_server))
-                # 修改操作系统代理设置
-                self.setup_windows_proxy(proxy_port)
+                # 修改操作系统代理设置（放到守护服务中设置）
+                # self.setup_windows_proxy(proxy_port)
             else:
                 self.logger.error(I18n.get("MITMDUMP_START_FAIL"))
         except Exception as e:

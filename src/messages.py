@@ -84,6 +84,16 @@ _translations: Dict[str, Dict[str, str]] = {
             "MAIN_SVC_CONFIG_ERROR": "Failed to get main service configuration: {}",
             "PROXY_SETTINGS_CHANGED": "Proxy settings change detected, new value: {}",
             "PROXY_CORRECTION_ERROR": "Error correcting proxy settings: {}",
+            # 新增：用户注册表监控相关日志
+            "MONITOR_STATUS": "Current monitored users: {}, new users: {}, removed users: {}",
+            "USER_MONITOR_ADDED": "Started monitoring user: {}, SID: {}",
+            "USER_MONITOR_REMOVED": "Stopped monitoring user: {}, SID: {}",
+            "USER_SCANNER_ERROR": "Error occurred during user scan: {}",
+            "ADD_MONITOR_ERROR": "Error adding monitor for user {}: {}",
+            "REMOVE_MONITOR_ERROR": "Error removing monitor for SID {}: {}",
+            "REGISTRY_CHECK_ERROR": "Error checking registry for SID {}: {}",
+            "USER_PROCESS_ERROR": "Error processing user {}: {}",
+            "USER_ENUM_ERROR": "Error enumerating users: {}",
             
             # ProxyConfig
             'proxy_tool_intro': "Proxy Configuration Tool\nUse help or ? to view help\nUse Tab key to auto-complete commands and parameters",
@@ -441,6 +451,16 @@ _translations: Dict[str, Dict[str, str]] = {
             "MAIN_SVC_CONFIG_ERROR": "获取主服务配置失败: {}",
             "PROXY_SETTINGS_CHANGED": "检测到代理设置变化，新值: {}",
             "PROXY_CORRECTION_ERROR": "修正代理设置出错: {}",
+            # 新增：用户注册表监控相关日志
+            "MONITOR_STATUS": "当前监控用户数: {}，新增用户: {}，移除用户: {}",
+            "USER_MONITOR_ADDED": "已开始监控用户: {}, SID: {}",
+            "USER_MONITOR_REMOVED": "已停止监控用户: {}, SID: {}",
+            "USER_SCANNER_ERROR": "用户扫描过程中发生错误: {}",
+            "ADD_MONITOR_ERROR": "添加用户 {} 的监控时出错: {}",
+            "REMOVE_MONITOR_ERROR": "移除SID为 {} 的用户监控时出错: {}",
+            "REGISTRY_CHECK_ERROR": "检查SID为 {} 的注册表时出错: {}",
+            "USER_PROCESS_ERROR": "处理用户 {} 时出错: {}",
+            "USER_ENUM_ERROR": "枚举用户时出错: {}",
 
             # proxy
             "FINAL_STATS": "\n=== {} 最终结果 ===",

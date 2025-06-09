@@ -48,7 +48,10 @@ PDATA_PATH = os.path.join(os.environ["ProgramData"], "InPurity")
 TOKEN_PATH = os.path.join(PDATA_PATH, "uninstall.token")
 ICON_PATH = os.path.join(BASE_DIR, "icon.ico")
 
-# DANGEROUS_VOCAB = ['未满18岁']
+DEFAULT_CONFIG = {"proxy_port": "51949", 
+                  "socket_port": "51001", 
+                  "upstream_enable": "0", 
+                  "enable_batch_processing": "0"}
 
 # 注册表子键
 INTERNET_SUB_KEY = ["ProxyEnable", "ProxyServer"]
