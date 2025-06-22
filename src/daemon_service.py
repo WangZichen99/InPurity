@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import psutil
 import winreg
 import win32net
 import functools
@@ -53,6 +54,10 @@ class DaemonService(win32serviceutil.ServiceFramework):
         
         # 用户扫描线程
         self.user_scanner_thread = None
+        # 看门狗
+        self.watchdog_processes = {} 
+        self.my_watchdog_ids = list(range(10, 20))  # 守护服务管理ID 10-19
+        self.watchdog_thread = None
 
     def _add_service_monitor(self):
         """添加主服务监控（固定的）"""
@@ -148,6 +153,10 @@ class DaemonService(win32serviceutil.ServiceFramework):
             
             # 清空线程字典
             self.monitor_threads.clear()
+
+        # 停止看门狗线程和进程
+        self._safely_stop_thread(self.watchdog_thread)
+        self.stop_all_watchdogs()
         
         # 清理资源
         self.log_manager.cleanup(script_name="daemon_service")
@@ -521,6 +530,165 @@ class DaemonService(win32serviceutil.ServiceFramework):
             self.logger.info(I18n.get("USER_MONITOR_REMOVED", username, sid))
         except Exception as e:
             self.logger.exception(I18n.get("REMOVE_MONITOR_ERROR", sid, str(e)))
+
+    
+    def scan_existing_watchdogs(self):
+        """扫描系统中现有的purity_watchdog.exe进程"""
+        logger.info("守护服务开始扫描现有看门狗进程...")
+        
+        found_watchdogs = {}
+        
+        try:
+            # 遍历所有进程，查找purity_watchdog.exe
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    if proc.info['name'].lower() == WATCHDOG_EXE_NAME.lower():
+                        cmdline = proc.info['cmdline']
+                        if cmdline and len(cmdline) >= 2 and cmdline[1].isdigit():
+                            watchdog_id = int(cmdline[1])
+                            
+                            # 检查是否为守护服务管理的看门狗
+                            if watchdog_id in self.my_watchdog_ids:
+                                if proc.is_running():
+                                    found_watchdogs[watchdog_id] = {
+                                        'process': None,  # 恢复的进程无subprocess对象
+                                        'pid': proc.info['pid'],
+                                        'recovered': True
+                                    }
+                                    logger.info(f"守护服务发现现有看门狗进程 #{watchdog_id}, PID: {proc.info['pid']}")
+                
+                except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+                    continue
+            
+            self.watchdog_processes = found_watchdogs
+            logger.info(f"守护服务扫描完成，发现 {len(found_watchdogs)} 个现有看门狗进程")
+            
+        except Exception as e:
+            logger.error(f"守护服务扫描现有进程时出错: {e}")
+
+    def watchdog_manager(self):
+        """看门狗管理线程"""
+        logger.info("守护服务看门狗管理线程启动")
+        
+        while self.is_running:
+            try:
+                # 检查现有看门狗进程状态
+                self.check_watchdog_processes()
+                
+                # 补充缺失的看门狗进程
+                self.create_missing_watchdogs()
+                
+                # 等待下次检查
+                time.sleep(SERVICE_CHECK_INTERVAL)
+                
+            except Exception as e:
+                logger.error(f"守护服务看门狗管理线程出错: {e}")
+                time.sleep(5)
+        
+        logger.info("守护服务看门狗管理线程结束")
+
+    def check_watchdog_processes(self):
+        """检查看门狗进程状态"""
+        active_watchdogs = {}
+        
+        for watchdog_id, info in self.watchdog_processes.items():
+            is_alive = False
+            
+            if info.get('recovered', False):
+                # 对于恢复的进程，通过PID检查
+                try:
+                    proc = psutil.Process(info['pid'])
+                    if proc.is_running() and proc.name().lower() == WATCHDOG_EXE_NAME.lower():
+                        # 进一步验证命令行参数
+                        cmdline = proc.cmdline()
+                        if len(cmdline) >= 2 and cmdline[1] == str(watchdog_id):
+                            is_alive = True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            else:
+                # 对于新创建的进程，通过subprocess对象检查
+                if info['process'] and info['process'].poll() is None:
+                    is_alive = True
+            
+            if is_alive:
+                active_watchdogs[watchdog_id] = info
+            else:
+                logger.warning(f"守护服务发现看门狗进程 #{watchdog_id} 已停止")
+        
+        self.watchdog_processes = active_watchdogs
+
+    def create_missing_watchdogs(self):
+        """创建缺失的看门狗进程"""
+        existing_ids = set(self.watchdog_processes.keys())
+        missing_ids = set(self.my_watchdog_ids) - existing_ids
+        
+        if missing_ids:
+            logger.info(f"守护服务需要创建看门狗进程: {sorted(missing_ids)}")
+            
+            watchdog_exe = self.get_watchdog_exe_path()
+            for watchdog_id in sorted(missing_ids):
+                try:
+                    self.create_watchdog_process(watchdog_id, watchdog_exe)
+                    time.sleep(0.2)  # 避免同时创建太多进程
+                except Exception as e:
+                    logger.error(f"守护服务创建看门狗进程 #{watchdog_id} 失败: {e}")
+
+    def create_watchdog_process(self, watchdog_id, watchdog_exe):
+        """创建单个看门狗进程"""
+        try:
+            # 启动看门狗进程，只传递ID参数
+            proc = subprocess.Popen([
+                watchdog_exe,
+                str(watchdog_id)
+            ], 
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+            )
+            
+            self.watchdog_processes[watchdog_id] = {
+                'process': proc,
+                'pid': proc.pid,
+                'recovered': False
+            }
+            
+            logger.info(f"守护服务创建看门狗进程 #{watchdog_id}, PID: {proc.pid}")
+        except Exception as e:
+            logger.error(f"守护服务创建看门狗进程 #{watchdog_id} 失败: {e}")
+            raise
+
+    def get_watchdog_exe_path(self):
+        """获取看门狗可执行文件路径"""
+        current_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        return os.path.join(current_dir, WATCHDOG_EXE_NAME)
+
+    def stop_all_watchdogs(self):
+        """停止所有看门狗进程"""
+        logger.info("守护服务正在停止所有看门狗进程...")
+        
+        for watchdog_id, info in self.watchdog_processes.items():
+            try:
+                if info.get('recovered', False):
+                    # 对于恢复的进程，通过PID终止
+                    try:
+                        proc = psutil.Process(info['pid'])
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                else:
+                    # 对于新创建的进程，通过subprocess对象终止
+                    if info['process'] and info['process'].poll() is None:
+                        info['process'].terminate()
+                        try:
+                            info['process'].wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            info['process'].kill()
+                
+                logger.info(f"守护服务已停止看门狗进程 #{watchdog_id}")
+            except Exception as e:
+                logger.error(f"守护服务停止看门狗进程 #{watchdog_id} 时出错: {e}")
+
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:

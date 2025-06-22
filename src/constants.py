@@ -4,6 +4,7 @@ import sys
 # 服务名称
 MAIN_SERVICE_NAME = "InPurityService"
 DAEMON_SERVICE_NAME = "InPurityDaemonService"
+WATCHDOG_NAME = "watchdog.exe"
 
 """获取应用程序的基础路径"""
 if getattr(sys, 'frozen', False):
@@ -12,6 +13,7 @@ if getattr(sys, 'frozen', False):
     # 服务可执行文件
     MAIN_SERVICE_PATH = os.path.join(BASE_DIR, 'main_service\\main_service.exe')
     DAEMON_SERVICE_PATH = os.path.join(BASE_DIR, 'daemon_service\\daemon_service.exe')
+    WATCHDOG_PATH = os.path.join(BASE_DIR, 'watchdog\\watchdog.exe')
     # 配置执行文件
     CONFIG_PATH = os.path.join(BASE_DIR, 'proxy_config\\')
     # run_mitmdump 路径
@@ -31,6 +33,7 @@ else:
     # 服务可执行文件
     MAIN_SERVICE_PATH = os.path.join(BASE_DIR, 'target\\dist\\main_service\\main_service.exe')
     DAEMON_SERVICE_PATH = os.path.join(BASE_DIR, 'target\\dist\\daemon_service\\daemon_service.exe')
+    WATCHDOG_PATH = os.path.join(BASE_DIR, 'target\\dist\\watchdog\\watchdog.exe')
     # 配置执行文件
     CONFIG_PATH = os.path.join(BASE_DIR, 'target\\dist\\proxy_config\\')
     # mitmdump 路径
@@ -132,6 +135,9 @@ DAEMON_SERVICE_CHECK_DELAY = 10  # 守护服务初始检查延迟（秒）
 INTERNET_MONITOR_INTERVAL = 10000  # 互联网设置监控间隔（毫秒）
 SERVICE_MONITOR_INTERVAL = 60000  # 服务设置监控间隔（毫秒）
 SERVICE_AUTO_START = 0x00000002  # 服务自动启动类型
+
+WATCHDOG_CHECK_INTERVAL = 0.5
+CHECK_WATCHDOG_INTERVAL = 3
 
 PORN_WORDS_CN = [
     "5aWz5ZCM", "LuS5sw==", "5b6u6IOW", "5bC7", "5bGM", "5Lq65aa7", "LuWmhw==", 
