@@ -11,7 +11,7 @@ from datetime import datetime, date
 
 class LogManager:
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
     _initialized = False
     rotate_flag = False #是否正在执行轮转
     deamon_flag = False #每个exe进程使用不同的log实例，无法重复执行的交给守护进程去做
@@ -59,7 +59,8 @@ class LogManager:
         log_files = glob.glob(os.path.join(self.base_dir, '*.log'))
         if not log_files:
             return rotate_dict
-        script_list = [key.split('@')[0] for key in self.loggers.keys()]
+        with self._lock:
+            script_list = [key.split('@')[0] for key in self.loggers.keys()]
         self.deamon_flag = "daemon_service" in script_list
         for log_file in log_files:
             try:
@@ -121,18 +122,19 @@ class LogManager:
         """轮转handler"""
         try:
             self.rotate_flag = True
-            for logger_key, logger in self.loggers.items():
-                script_name = logger_key.split('@')[0]
-                # 移除旧的handler
-                old_handler = self.handlers[logger_key]
-                logger.removeHandler(old_handler)
-                old_handler.close()
-                # 创建新的handler
-                new_log_file = self._get_current_log_file(script_name)
-                new_handler = logging.FileHandler(new_log_file, encoding='utf-8')
-                new_handler.setFormatter(old_handler.formatter)
-                logger.addHandler(new_handler)
-                self.handlers[logger_key] = new_handler
+            with self._lock:
+                for logger_key, logger in self.loggers.items():
+                    script_name = logger_key.split('@')[0]
+                    # 移除旧的handler
+                    old_handler = self.handlers[logger_key]
+                    logger.removeHandler(old_handler)
+                    old_handler.close()
+                    # 创建新的handler
+                    new_log_file = self._get_current_log_file(script_name)
+                    new_handler = logging.FileHandler(new_log_file, encoding='utf-8')
+                    new_handler.setFormatter(old_handler.formatter)
+                    logger.addHandler(new_handler)
+                    self.handlers[logger_key] = new_handler
             if len(self.rotate_dict) > 0:
                 if "log_manager" in self.rotate_dict.keys() and not self.deamon_flag:
                     self.rotate_dict.pop("log_manager")
