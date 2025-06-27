@@ -66,6 +66,8 @@ class RegistryMonitor:
                     self.logger.warning(I18n.get("UNHANDLED_REGISTRY_TYPE", regtype, value_name))
                     values[value_name] = None
             except Exception as e:
+                if e.args[-2] == 1018: # 试图在标记为删除的注册表项上进行不合法的操作
+                    return None
                 self.logger.exception(I18n.get("REGISTRY_READ_ERROR", value_name, e))
                 values[value_name] = None
         return values
@@ -93,7 +95,8 @@ class RegistryMonitor:
                 break
             elif ret == win32event.WAIT_OBJECT_0:
                 new_values = self._read_registry_values()
-                self.callback(new_values)  # 触发回调函数，并传递新读取的值
+                if new_values:
+                    self.callback(new_values)  # 触发回调函数，并传递新读取的值
                 # 重置事件并继续监听
                 win32event.ResetEvent(self.event)
             elif ret == win32event.WAIT_TIMEOUT:

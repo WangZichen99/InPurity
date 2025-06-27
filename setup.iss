@@ -29,9 +29,11 @@ Source: "D:\Workspace\Python\antiproxy\target\dist\gui\*"; DestDir: "{app}\gui";
 Source: "D:\Workspace\Python\antiproxy\target\dist\run_mitmdump\*"; DestDir: "{app}\run_mitmdump"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\target\dist\install_script\*"; DestDir: "{app}\install_script"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\target\dist\proxy_config\*"; DestDir: "{app}\proxy_config"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "D:\Workspace\Python\antiproxy\target\dist\watchdog\*"; DestDir: "{app}\watchdog"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "D:\Workspace\Python\antiproxy\certificates\mitmproxy-ca-cert.cer"; DestDir: "C:\Windows\System32\config\systemprofile\.mitmproxy"; Flags: onlyifdoesntexist recursesubdirs
 Source: "D:\Workspace\Python\antiproxy\model\mobilenet_v2.onnx"; DestDir: "{app}\model"; Flags: ignoreversion recursesubdirs
 Source: "D:\Workspace\Python\antiproxy\icon.ico"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+;Source: "D:\Workspace\Python\antiproxy\watchdog.ico"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 
 [Code]
 var

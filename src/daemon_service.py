@@ -6,6 +6,7 @@ import winreg
 import win32net
 import functools
 import threading
+import subprocess
 import win32event
 import pywintypes
 import win32netcon
@@ -22,7 +23,8 @@ from registry_monitor import RegistryMonitor
 from constants import (
     MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, INTERNET_SUB_KEY, SERVICE_SUB_KEY, TOKEN_PATH,
     DAEMON_THREAD_JOIN_TIMEOUT, DAEMON_SERVICE_CHECK_DELAY, INTERNET_MONITOR_INTERVAL,
-    SERVICE_MONITOR_INTERVAL, EXPECTED_VALUES, SERVICE_HOST, DEFAULT_CONFIG
+    SERVICE_MONITOR_INTERVAL, EXPECTED_VALUES, SERVICE_HOST, DEFAULT_CONFIG, WATCHDOG_NAME,
+    WATCHDOG_PATH, CHECK_WATCHDOG_INTERVAL
 )
 
 class DaemonService(win32serviceutil.ServiceFramework):
@@ -44,19 +46,16 @@ class DaemonService(win32serviceutil.ServiceFramework):
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.service_stop_event = win32event.CreateEvent(None, 0, 0, None)
         self.running = True
-        
         # 初始化线程集合和线程锁
         self.monitor_threads = {}  # 使用字典而不是列表，键为用户SID或特殊标识符
         self.monitor_threads_lock = threading.Lock()  # 添加线程锁保护线程字典
-        
         # 添加主服务监控（这个是固定的）
         self._add_service_monitor()
-        
         # 用户扫描线程
         self.user_scanner_thread = None
         # 看门狗
         self.watchdog_processes = {} 
-        self.my_watchdog_ids = list(range(10, 20))  # 守护服务管理ID 10-19
+        self.my_watchdog_ids = list(range(5, 10))  # 守护服务管理ID 5-9
         self.watchdog_thread = None
 
     def _add_service_monitor(self):
@@ -128,20 +127,19 @@ class DaemonService(win32serviceutil.ServiceFramework):
         停止服务
         """
         self.logger.info(I18n.get("SVC_STOP_SIGNAL"))
-        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
-        
         # 验证卸载标识
         if not self.security_manager.verify_uninstall_token():
             self.logger.warning(I18n.get("ILLEGAL_STOP"))
-            self.ReportServiceStatus(win32service.SERVICE_RUNNING)
             return
-            
+        self.stop()
+    
+    def stop(self):
         self.logger.info(I18n.get("DAEMON_SVC_STOPPING"))
+        self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
         self.running = False
         
         # 先停止用户扫描线程
         self._safely_stop_thread(self.user_scanner_thread)
-        
         # 停止所有监控线程
         with self.monitor_threads_lock:
             for sid, info in list(self.monitor_threads.items()):
@@ -150,7 +148,6 @@ class DaemonService(win32serviceutil.ServiceFramework):
                     self._safely_stop_thread(info["thread"])
                 except Exception as e:
                     self.logger.exception(I18n.get("THREAD_STOP_ERROR", sid, str(e)))
-            
             # 清空线程字典
             self.monitor_threads.clear()
 
@@ -171,13 +168,12 @@ class DaemonService(win32serviceutil.ServiceFramework):
             self.logger.info(I18n.get("DAEMON_SVC_STARTED"))
             self.ReportServiceStatus(win32service.SERVICE_RUNNING)
             self._initialize_service()
-            self._run_main_loop()
+            self.scan_existing_watchdogs()
+            self.watchdog_manager()
+            win32event.WaitForSingleObject(self.service_stop_event, win32event.INFINITE)
         except Exception as e:
             self.logger.exception(I18n.get("daemon_init_error", str(e)))
-            self.SvcStop()
-            raise
-        finally:
-            self.ReportServiceStatus(win32service.SERVICE_STOPPED)
+            self.stop()
 
     def _initialize_service(self):
         """
@@ -200,39 +196,6 @@ class DaemonService(win32serviceutil.ServiceFramework):
             "user-scanner",
             (8,)  # 8秒扫描间隔
         )
-
-    def _run_main_loop(self):
-        """
-        运行服务主循环
-        """
-        # 等待初始化完成
-        time.sleep(DAEMON_SERVICE_CHECK_DELAY)
-        while self.running:
-            try:
-                if not self.security_manager.verify_uninstall_token():
-                    # 获取服务状态
-                    status = win32serviceutil.QueryServiceStatus(MAIN_SERVICE_NAME)
-                    # 检查服务是否停止
-                    if status[1] == win32service.SERVICE_STOPPED:
-                        self.logger.info(I18n.get("MAIN_SVC_RESTART_ATTEMPT"))
-                        # 尝试重新启动服务
-                        win32serviceutil.StartService(MAIN_SERVICE_NAME)
-                        self.logger.info(I18n.get("MAIN_SVC_RESTARTED"))
-                time.sleep(1)
-            except pywintypes.error as e:
-                # 处理系统正在关机时的错误 (错误码 1115)
-                if e.args[0] == 1115:
-                    self.logger.warning(I18n.get("SYSTEM_SHUTDOWN_WARNING"))
-                    win32event.WaitForSingleObject(self.service_stop_event, win32event.INFINITE)
-                    break
-                else:
-                    # 记录其他异常
-                    self.logger.exception(I18n.get("ERROR", str(e)))
-            except Exception as e:
-                self.logger.exception(I18n.get("daemon_main_loop_error", str(e)))
-        
-        # 等待停止事件
-        win32event.WaitForSingleObject(self.service_stop_event, win32event.INFINITE)
 
     def delete_token(self):
         """
@@ -401,13 +364,16 @@ class DaemonService(win32serviceutil.ServiceFramework):
         try:
             # 获取所有普通用户账户
             while True:
-                users, _, resume_handle = win32net.NetUserEnum(
-                    None,  # 本地计算机
-                    0,     # 基本信息
-                    win32netcon.FILTER_NORMAL_ACCOUNT,  # 普通账户
-                    resume_handle,
-                    win32netcon.MAX_PREFERRED_LENGTH
-                )
+                try:
+                    users, _, resume_handle = win32net.NetUserEnum(
+                        None,  # 本地计算机
+                        0,     # 基本信息
+                        win32netcon.FILTER_NORMAL_ACCOUNT,  # 普通账户
+                        resume_handle,
+                        win32netcon.MAX_PREFERRED_LENGTH
+                    )
+                except Exception as e:
+                    break
                 
                 for user in users:
                     username = user['name']
@@ -530,108 +496,78 @@ class DaemonService(win32serviceutil.ServiceFramework):
             self.logger.info(I18n.get("USER_MONITOR_REMOVED", username, sid))
         except Exception as e:
             self.logger.exception(I18n.get("REMOVE_MONITOR_ERROR", sid, str(e)))
-
     
     def scan_existing_watchdogs(self):
-        """扫描系统中现有的purity_watchdog.exe进程"""
-        logger.info("守护服务开始扫描现有看门狗进程...")
-        
+        """扫描系统中现有的watchdog.exe进程"""
+        self.logger.info("开始扫描现有看门狗进程...")
         found_watchdogs = {}
-        
         try:
-            # 遍历所有进程，查找purity_watchdog.exe
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            # 遍历所有进程，查找watchdog.exe
+            for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
                 try:
-                    if proc.info['name'].lower() == WATCHDOG_EXE_NAME.lower():
+                    if proc.info['name'] == WATCHDOG_NAME and (proc.info['exe'] and proc.info['exe'] == WATCHDOG_PATH):
                         cmdline = proc.info['cmdline']
                         if cmdline and len(cmdline) >= 2 and cmdline[1].isdigit():
                             watchdog_id = int(cmdline[1])
-                            
-                            # 检查是否为守护服务管理的看门狗
-                            if watchdog_id in self.my_watchdog_ids:
-                                if proc.is_running():
-                                    found_watchdogs[watchdog_id] = {
-                                        'process': None,  # 恢复的进程无subprocess对象
-                                        'pid': proc.info['pid'],
-                                        'recovered': True
-                                    }
-                                    logger.info(f"守护服务发现现有看门狗进程 #{watchdog_id}, PID: {proc.info['pid']}")
-                
+                            # 检查是否为主服务管理的看门狗
+                            if watchdog_id in self.my_watchdog_ids and proc.is_running():
+                                found_watchdogs[watchdog_id] = {
+                                    'pid': proc.info['pid'],
+                                    'process': proc, 
+                                }
+                                self.logger.info(f"发现现有看门狗进程 #{watchdog_id}, PID: {found_watchdogs[watchdog_id]['pid']}")
                 except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
                     continue
-            
             self.watchdog_processes = found_watchdogs
-            logger.info(f"守护服务扫描完成，发现 {len(found_watchdogs)} 个现有看门狗进程")
-            
+            self.logger.info(f"扫描完成，发现 {len(found_watchdogs)} 个现有看门狗进程")
         except Exception as e:
-            logger.error(f"守护服务扫描现有进程时出错: {e}")
+            self.logger.exception(f"扫描现有进程时出错: {e}")
 
     def watchdog_manager(self):
         """看门狗管理线程"""
-        logger.info("守护服务看门狗管理线程启动")
-        
-        while self.is_running:
-            try:
-                # 检查现有看门狗进程状态
-                self.check_watchdog_processes()
-                
-                # 补充缺失的看门狗进程
-                self.create_missing_watchdogs()
-                
-                # 等待下次检查
-                time.sleep(SERVICE_CHECK_INTERVAL)
-                
-            except Exception as e:
-                logger.error(f"守护服务看门狗管理线程出错: {e}")
-                time.sleep(5)
-        
-        logger.info("守护服务看门狗管理线程结束")
+        self.logger.info("看门狗管理线程启动")
+        while self.running:
+            if not self.security_manager.verify_uninstall_token():
+                try:
+                    win32serviceutil.QueryServiceStatus(MAIN_SERVICE_NAME)
+                    # 检查现有看门狗进程状态
+                    self.check_watchdog_processes()
+                    # 补充缺失的看门狗进程
+                    self.create_missing_watchdogs()
+                    # 等待下次检查
+                    time.sleep(CHECK_WATCHDOG_INTERVAL)
+                except pywintypes.error as e:
+                    # 处理系统正在关机时的错误 (错误码 1115)
+                    if e.args[0] == 1115:
+                        self.logger.warning(I18n.get("SYSTEM_SHUTDOWN_WARNING"))
+                        win32event.WaitForSingleObject(self.service_stop_event, win32event.INFINITE)
+                except Exception as e:
+                    self.logger.exception(f"看门狗管理线程出错: {e}")
+                    time.sleep(5)
+        self.logger.info("看门狗管理线程结束")
 
     def check_watchdog_processes(self):
         """检查看门狗进程状态"""
         active_watchdogs = {}
-        
-        for watchdog_id, info in self.watchdog_processes.items():
-            is_alive = False
-            
-            if info.get('recovered', False):
-                # 对于恢复的进程，通过PID检查
-                try:
-                    proc = psutil.Process(info['pid'])
-                    if proc.is_running() and proc.name().lower() == WATCHDOG_EXE_NAME.lower():
-                        # 进一步验证命令行参数
-                        cmdline = proc.cmdline()
-                        if len(cmdline) >= 2 and cmdline[1] == str(watchdog_id):
-                            is_alive = True
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            else:
-                # 对于新创建的进程，通过subprocess对象检查
-                if info['process'] and info['process'].poll() is None:
-                    is_alive = True
-            
-            if is_alive:
-                active_watchdogs[watchdog_id] = info
-            else:
-                logger.warning(f"守护服务发现看门狗进程 #{watchdog_id} 已停止")
-        
+        for watchdog_id, info in self.watchdog_processes.items():    
+            try:
+                proc = psutil.Process(info['pid'])
+                if proc.is_running() and proc.name() == WATCHDOG_NAME:
+                    active_watchdogs[watchdog_id] = info
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                self.logger.warning(f"发现看门狗进程 #{watchdog_id} 已停止")
         self.watchdog_processes = active_watchdogs
 
     def create_missing_watchdogs(self):
         """创建缺失的看门狗进程"""
         existing_ids = set(self.watchdog_processes.keys())
         missing_ids = set(self.my_watchdog_ids) - existing_ids
-        
         if missing_ids:
-            logger.info(f"守护服务需要创建看门狗进程: {sorted(missing_ids)}")
-            
-            watchdog_exe = self.get_watchdog_exe_path()
-            for watchdog_id in sorted(missing_ids):
-                try:
-                    self.create_watchdog_process(watchdog_id, watchdog_exe)
-                    time.sleep(0.2)  # 避免同时创建太多进程
-                except Exception as e:
-                    logger.error(f"守护服务创建看门狗进程 #{watchdog_id} 失败: {e}")
+            missing_ids = sorted(missing_ids)
+            self.logger.info(f"需要创建看门狗进程: {missing_ids}")
+            for watchdog_id in missing_ids:
+                self.create_watchdog_process(watchdog_id, WATCHDOG_PATH)
+                time.sleep(0.2)  # 避免同时创建太多进程
 
     def create_watchdog_process(self, watchdog_id, watchdog_exe):
         """创建单个看门狗进程"""
@@ -645,50 +581,36 @@ class DaemonService(win32serviceutil.ServiceFramework):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
             )
-            
             self.watchdog_processes[watchdog_id] = {
-                'process': proc,
                 'pid': proc.pid,
-                'recovered': False
+                'process': proc,
             }
-            
-            logger.info(f"守护服务创建看门狗进程 #{watchdog_id}, PID: {proc.pid}")
+            self.logger.info(f"创建看门狗进程 #{watchdog_id}, PID: {proc.pid}")
         except Exception as e:
-            logger.error(f"守护服务创建看门狗进程 #{watchdog_id} 失败: {e}")
-            raise
-
-    def get_watchdog_exe_path(self):
-        """获取看门狗可执行文件路径"""
-        current_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        return os.path.join(current_dir, WATCHDOG_EXE_NAME)
+            self.logger.exception(f"创建看门狗进程 #{watchdog_id} 失败: {e}")
 
     def stop_all_watchdogs(self):
         """停止所有看门狗进程"""
-        logger.info("守护服务正在停止所有看门狗进程...")
-        
-        for watchdog_id, info in self.watchdog_processes.items():
+        self.logger.info("全局扫描并杀死所有watchdog进程...")
+        for proc in psutil.process_iter(['pid', 'name', 'exe']):
             try:
-                if info.get('recovered', False):
-                    # 对于恢复的进程，通过PID终止
-                    try:
-                        proc = psutil.Process(info['pid'])
-                        proc.terminate()
-                        proc.wait(timeout=5)
-                    except psutil.TimeoutExpired:
-                        proc.kill()
-                else:
-                    # 对于新创建的进程，通过subprocess对象终止
-                    if info['process'] and info['process'].poll() is None:
-                        info['process'].terminate()
-                        try:
-                            info['process'].wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            info['process'].kill()
-                
-                logger.info(f"守护服务已停止看门狗进程 #{watchdog_id}")
-            except Exception as e:
-                logger.error(f"守护服务停止看门狗进程 #{watchdog_id} 时出错: {e}")
-
+                if proc.info['name'] == WATCHDOG_NAME and proc.info['exe'] == WATCHDOG_PATH:
+                    self.logger.info(f"杀死watchdog进程: PID={proc.info['pid']}, EXE={proc.info['exe']}")
+                    proc.terminate()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+                continue
+        while True:
+            found = False
+            for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                try:
+                    if proc.info['name'] == WATCHDOG_NAME and proc.info['exe'] == WATCHDOG_PATH:
+                        found = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
+                    continue
+            if not found:
+                break
+            time.sleep(0.5)
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:

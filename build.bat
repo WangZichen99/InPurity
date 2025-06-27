@@ -41,6 +41,9 @@ pyinstaller --onedir --icon ..\icon.ico ..\src\uninstaller.py --noconfirm
 echo Building gui.py...
 pyinstaller --noconsole --onedir --windowed --icon ..\icon.ico ..\src\gui.py --noconfirm
 
+echo Building watchdog.py...
+pyinstaller --onedir --icon ..\watchdog.ico ..\src\watchdog.py --noconfirm
+
 set "source=dist\uninstaller"
 set "target=setup\uninstaller"
 

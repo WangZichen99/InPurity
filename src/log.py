@@ -5,6 +5,7 @@ import shutil
 import logging
 import threading
 from i18n import I18n
+from filelock import FileLock
 from constants import LOG_PATH
 from typing import Dict, Optional
 from datetime import datetime, date
@@ -140,18 +141,22 @@ class LogManager:
                     self.rotate_dict.pop("log_manager")
                 for script_name in list(self.rotate_dict.keys()):
                     file_path, date_str = self.rotate_dict[script_name]
-                    archive_date_dir = os.path.join(self.archive_dir, date_str)
-                    if not os.path.exists(archive_date_dir):
-                        os.makedirs(archive_date_dir, exist_ok=True)
-                    try:
-                        dest_file = os.path.join(archive_date_dir, os.path.basename(file_path))
-                        if os.path.exists(dest_file):
-                            os.remove(dest_file)
-                        shutil.move(file_path, archive_date_dir)
-                        self.rotate_dict.pop(script_name)
-                        self.logger.info(I18n.get("move_file", file_path, archive_date_dir))
-                    except Exception as e:
-                        self.logger.exception(I18n.get("move_file_error", str(e)))
+                    lock_path = file_path + ".lock"
+                    with FileLock(lock_path, timeout=10):
+                        if not os.path.exists(file_path):
+                            continue
+                        archive_date_dir = os.path.join(self.archive_dir, date_str)
+                        if not os.path.exists(archive_date_dir):
+                            os.makedirs(archive_date_dir, exist_ok=True)
+                        try:
+                            dest_file = os.path.join(archive_date_dir, os.path.basename(file_path))
+                            if os.path.exists(dest_file):
+                                os.remove(dest_file)
+                            shutil.move(file_path, archive_date_dir)
+                            self.rotate_dict.pop(script_name)
+                            self.logger.info(I18n.get("move_file", file_path, archive_date_dir))
+                        except Exception as e:
+                            self.logger.exception(I18n.get("move_file_error", str(e)))
         except Exception as e:
             self.logger.exception(I18n.get("log_exception", str(e)))
         finally:
