@@ -152,11 +152,12 @@ PORN_WORDS_CN = [
     "5rij55S3", "5ZCD55Oc", "6buR5paZ", "54iG5paZ", "5oqW6Z+z", "5b+r5omL", "572R57qi", "56aP5Yip5aes", 
     "5aGM5oi/", "6b6f5aS0", "5Lit5Ye6", "5aup5aa5", "5p6B5ZOB", "56C05aSE", "5pK4566h", "5aSE5aWz", 
     "5YaF5bCE", "5LiB5a2X6KOk", "55S35qih", "5omT5qGp5py6", "6YeN5Y+j", "56eB5a+G", "5q+N54uX", 
-    "57Sg5Lq6", "5Yi25pyN", "5Lmx5Lqk", "6IKP",
+    "57Sg5Lq6", "5Yi25pyN", "5Lmx5Lqk", "6IKP", "MThcKw==", "MTjnpoE=", "56aB5ryr", "5oyH57q55rWP6KeI5Zmo",
 ]
 
 PORN_WORDS_EN = [
     "cG9ybg==", "c2V4", "bnVkZQ==", "YXNz", "ZGljaw==", "dGl0cw==", "bWlsZg==",
     "Y3Vt", "Z2F5", "YmJ3", "b3JnYXNt", "YW5hbA==", "Ymxvd2pvYg==", "aGFuZGpvYg==", 
     "bGVzYmlhbg==", "cHVzc3k=", "Y3Vtc2hvdA==", "ZnVjaw==", "ZnVja2luZw==", "aGVudGFp",
+    "YWRzcG93ZXI=",
 ] 

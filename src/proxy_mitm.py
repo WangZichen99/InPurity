@@ -11,6 +11,7 @@ from datetime import date
 from mitmproxy import http
 from log import LogManager
 from threading import Timer
+from bs4 import BeautifulSoup
 from ai_detect import ImagePredictor
 from db_manager import DatabaseManager
 from forbid_manager import ForbidEventManager
@@ -44,7 +45,7 @@ class InPurityProxy:
         # 预解码敏感词并转换为Set
         self.sensitive_words_cn = set()
         self.sensitive_words_en = set()
-        self.blocked_words = set()
+        # self.blocked_words = set()
         self._preload_sensitive_words()
         
         # 站点统计相关的线程锁
@@ -214,15 +215,21 @@ class InPurityProxy:
         content_type = flow.response.headers.get("Content-Type", "").lower()
         # 检查搜索内容
         if any(content_type.startswith(type) for type in TEXT_CONTENT_TYPES):
-            search_term = self._extract_and_decode_search_params(flow.request.url)
-            before = len(self.blocked_words)
-            if search_term and self._contains_sensitive_keywords(search_term):
+            html_content = flow.response.text 
+            if html_content: # 确保内容不为空
+                soup = BeautifulSoup(html_content, 'html.parser')
+                title_tag = soup.find('title')
+                if title_tag:
+                    title_text = title_tag.get_text(strip=True)
+            # search_term = self._extract_and_decode_search_params(flow.request.url)
+            # before = len(self.blocked_words)
+            if title_text and self._contains_sensitive_keywords(title_text):
                 self.logger.info(I18n.get("SENSITIVE_SEARCH_BLOCKED"))
                 flow.kill()
-                after = len(self.blocked_words)
-                if after > before:
-                    self.dangerous_count += 1
-                    self.set_forbid()
+                # after = len(self.blocked_words)
+                # if after > before:
+                #     self.dangerous_count += 1
+                #     self.set_forbid()
                 return
         # 图像流媒体拦截
         if self.img_forbid and (self._is_image_request(flow, content_type) or 
@@ -260,21 +267,21 @@ class InPurityProxy:
         if not search_term:
             return False
         
-        chinese_word_pattern = re.compile(r'[\u4e00-\u9fff]+')
+        # chinese_word_pattern = re.compile(r'[\u4e00-\u9fff]+')
         english_word_pattern = re.compile(r'[a-zA-Z]+')
-        chinese_term = chinese_word_pattern.findall(search_term)
+        # chinese_term = chinese_word_pattern.findall(search_term)
         english_term = english_word_pattern.findall(search_term)
 
-        if chinese_term:
-            for term in chinese_term:
-                for word in self.sensitive_words_cn:
-                    if re.search(word, term):
-                        self.blocked_words.add(term)
-                        return True
+        # if chinese_term:
+        #     for term in chinese_term:
+        for word in self.sensitive_words_cn:
+            if re.search(word, search_term):
+                # self.blocked_words.add(search_term)
+                return True
         if english_term:
             for term in english_term:
                 if term.lower() in self.sensitive_words_en:
-                    self.blocked_words.add(term)
+                    # self.blocked_words.add(term)
                     return True
         return False
 
