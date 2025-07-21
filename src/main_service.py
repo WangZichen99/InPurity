@@ -889,7 +889,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
         """创建缺失的看门狗进程"""
         existing_ids = set(self.watchdog_processes.keys())
         missing_ids = set(self.my_watchdog_ids) - existing_ids
-        if missing_ids:
+        if missing_ids and not self.security_manager.verify_uninstall_token():
             missing_ids = sorted(missing_ids)
             self.logger.info(f"需要创建看门狗进程: {missing_ids}")
             for watchdog_id in missing_ids:
@@ -926,18 +926,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
                     proc.terminate()
             except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
                 continue
-        while True:
-            found = False
-            for proc in psutil.process_iter(['pid', 'name', 'exe']):
-                try:
-                    if proc.info['name'] == WATCHDOG_NAME and proc.info['exe'] == WATCHDOG_PATH:
-                        found = True
-                        break
-                except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError):
-                    continue
-            if not found:
-                break
-            time.sleep(0.5)
 
 if __name__ == '__main__':
     if len(sys.argv) == 1:

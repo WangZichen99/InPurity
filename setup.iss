@@ -142,7 +142,6 @@ begin
       DaemonServiceWasStopped := True
     else if ServiceName = 'InPurityService' then
       ServiceWasStopped := True;
-    
     Log(Format('Service %s stopped successfully', [ServiceName]));
   end
   else
@@ -164,7 +163,7 @@ end;
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
 begin
   // 恢复网络连接
-  EnableNetwork();
+  // EnableNetwork();
   if DaemonServiceWasStopped then
     StartService('InPurityDaemonService');
 end;
@@ -175,7 +174,7 @@ begin
   if CurProgress = -1 then
   begin
     Log('Installation interrupted, attempting to restore services');
-    EnableNetwork();// 恢复网络连接
+    // EnableNetwork();// 恢复网络连接
     if DaemonServiceWasStopped then
       StartService('InPurityDaemonService');
   end;

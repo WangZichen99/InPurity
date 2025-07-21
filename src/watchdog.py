@@ -13,7 +13,7 @@ class ServiceWatchdog:
     def __init__(self, watchdog_id):
         self.watchdog_id = watchdog_id
         self.main_service = MAIN_SERVICE_NAME
-        self.guardian_service = DAEMON_SERVICE_NAME
+        self.daemon_service = DAEMON_SERVICE_NAME
         self.check_interval = WATCHDOG_CHECK_INTERVAL
         self.logger = LogManager().get_logger('watchdog', 'watchdog')
         self.is_running = True
@@ -100,7 +100,7 @@ class ServiceWatchdog:
                 # 检查主服务
                 self.check_and_restart_service(self.main_service)
                 # 检查守护服务
-                self.check_and_restart_service(self.guardian_service)
+                self.check_and_restart_service(self.daemon_service)
                 # 等待下一个检查周期
                 time.sleep(self.check_interval)
             except Exception as e:

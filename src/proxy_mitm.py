@@ -45,7 +45,6 @@ class InPurityProxy:
         # 预解码敏感词并转换为Set
         self.sensitive_words_cn = set()
         self.sensitive_words_en = set()
-        # self.blocked_words = set()
         self._preload_sensitive_words()
         
         # 站点统计相关的线程锁
@@ -213,24 +212,6 @@ class InPurityProxy:
 
     def responseheaders(self, flow: http.HTTPFlow) -> None:
         content_type = flow.response.headers.get("Content-Type", "").lower()
-        # 检查搜索内容
-        if any(content_type.startswith(type) for type in TEXT_CONTENT_TYPES):
-            html_content = flow.response.text 
-            if html_content: # 确保内容不为空
-                soup = BeautifulSoup(html_content, 'html.parser')
-                title_tag = soup.find('title')
-                if title_tag:
-                    title_text = title_tag.get_text(strip=True)
-            # search_term = self._extract_and_decode_search_params(flow.request.url)
-            # before = len(self.blocked_words)
-            if title_text and self._contains_sensitive_keywords(title_text):
-                self.logger.info(I18n.get("SENSITIVE_SEARCH_BLOCKED"))
-                flow.kill()
-                # after = len(self.blocked_words)
-                # if after > before:
-                #     self.dangerous_count += 1
-                #     self.set_forbid()
-                return
         # 图像流媒体拦截
         if self.img_forbid and (self._is_image_request(flow, content_type) or 
                                ("video" in content_type or "octet-stream" in content_type) or 
@@ -241,54 +222,44 @@ class InPurityProxy:
         if any(content_type.startswith(t) for t in STREAMING_TYPES):
             flow.response.stream = True
             self.logger.info(I18n.get("STREAM_DATA_DETECTED", content_type))
-
-    def _extract_and_decode_search_params(self, url: str) -> str:
-        """提取URL中的查询参数并正确解码，包括多次编码的情况"""
-        parsed_url = urlparse(url)
-        query_params = parse_qs(parsed_url.query)
-        # 常见搜索参数名称
-        search_params = ['q', 'query', 'wd', 'word', 'keyword', 'kw', 'text', 'search', 'p']
-        # 提取可能的搜索参数
-        for param in search_params:
-            if param in query_params:
-                value = query_params[param][0]
-                return value
-        # 如果没有找到常见搜索参数，则检查所有参数值
-        # for param, values in query_params.items():
-        #     for value in values:
-        #         decoded_value = self._deep_url_decode(value)
-        #         # 如果解码后的值包含中文，可能是搜索词
-        #         if self._contains_chinese(decoded_value):
-        #             return decoded_value
-        return ""
     
-    def _contains_sensitive_keywords(self, search_term: str) -> bool:
+    def _contains_sensitive_keywords(self, html_content: str) -> bool:
         """检查搜索词是否包含敏感关键词"""
-        if not search_term:
+        if not html_content:
             return False
-        
-        # chinese_word_pattern = re.compile(r'[\u4e00-\u9fff]+')
-        english_word_pattern = re.compile(r'[a-zA-Z]+')
-        # chinese_term = chinese_word_pattern.findall(search_term)
-        english_term = english_word_pattern.findall(search_term)
-
-        # if chinese_term:
-        #     for term in chinese_term:
-        for word in self.sensitive_words_cn:
-            if re.search(word, search_term):
-                # self.blocked_words.add(search_term)
-                return True
-        if english_term:
-            for term in english_term:
-                if term.lower() in self.sensitive_words_en:
-                    # self.blocked_words.add(term)
-                    return True
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            title_tag = soup.find('title')
+            if title_tag:
+                title_text = title_tag.get_text(strip=True)
+                self.logger.info(f"page title: {title_text}")
+                # 检查中英文敏感词
+                english_word_pattern = re.compile(r'[a-zA-Z0-9]+')
+                english_term = english_word_pattern.findall(title_text)
+                for word in self.sensitive_words_cn:
+                    if re.search(word, title_text):
+                        return True
+                if english_term:
+                    for term in english_term:
+                        if term.lower() in self.sensitive_words_en:
+                            return True
+        except Exception as e:
+            self.logger.exception(f"wrong resolve html: {e}")
         return False
 
     def response(self, flow: http.HTTPFlow) -> None:
         if flow.response.status_code == 200:
             content_type = flow.response.headers.get("Content-Type", "").lower()
-            
+            if any(content_type.startswith(type) for type in TEXT_CONTENT_TYPES):
+                try:
+                    html_text = flow.response.text
+                    if self._contains_sensitive_keywords(html_text):
+                        self.logger.info(I18n.get("SENSITIVE_SEARCH_BLOCKED"))
+                        flow.kill()
+                        return
+                except UnicodeDecodeError:
+                    pass
+                
             # 快速过滤掉不需要处理的内容类型
             if any(t in content_type for t in SKIP_CONTENT_TYPES):
                 return
