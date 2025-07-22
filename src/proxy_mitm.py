@@ -257,7 +257,7 @@ class InPurityProxy:
                         self.logger.info(I18n.get("SENSITIVE_SEARCH_BLOCKED"))
                         flow.kill()
                         return
-                except UnicodeDecodeError:
+                except Exception:
                     pass
                 
             # 快速过滤掉不需要处理的内容类型
