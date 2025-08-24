@@ -18,6 +18,7 @@ import win32service
 import win32process
 import win32security
 import servicemanager
+import browser_proxy
 from i18n import I18n
 import win32serviceutil
 from pathlib import Path
@@ -126,7 +127,13 @@ class InPurityService(win32serviceutil.ServiceFramework):
                 self.logger.info(I18n.get("MITMPROXY_TERMINATED"))
                 self.stop_mitmproxy()
                 self.start_mitmproxy()
-                
+            # 检查浏览器是否使用了单独代理
+            if self.get_upstream_enable():
+                try:
+                    upstream = self.get_upstream_server()
+                    browser_proxy.main(exclude_ports={self.get_proxy_port()}, hit_ports={int(upstream[upstream.rfind(':')+1:])})
+                except Exception as e:
+                    self.logger.exception(I18n.get("ERROR", e))
             # 每20秒检查一次，分为4次5秒的间隔，以便更快地响应停止请求
             for _ in range(4):
                 if not self.running:
