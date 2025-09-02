@@ -1,6 +1,8 @@
 import os
 import sys
 import time
+import json
+import queue
 import signal
 import psutil
 import winreg
@@ -9,8 +11,10 @@ import socket
 import win32ts
 import win32api
 import win32con
-import threading
+import win32pipe
 import win32file
+import threading
+import pywintypes
 import subprocess
 import win32event
 import win32profile
@@ -18,20 +22,21 @@ import win32service
 import win32process
 import win32security
 import servicemanager
-import browser_proxy
 from i18n import I18n
 import win32serviceutil
+from queue import Queue
 from pathlib import Path
 from log import LogManager
 from security import SecurityManager
 from db_manager import DatabaseManager
+from detector_backend import BackendDetector
 from registry_monitor import RegistryMonitor
 from constants import (MITMDUMP_PATH, MAIN_SERVICE_NAME, DAEMON_SERVICE_NAME, 
                        SCRIPT_PATH, SERVICE_SUB_KEY, GUI_PATH, SYSTEM_PROCESSES,
                        SERVICE_HOST, GUI_PIPE_NAME, RANDOM_PORT_MIN, RANDOM_PORT_MAX,
                        DEFAULT_THREAD_TIMEOUT, MAX_USER_WAIT_SECONDS, EXPECTED_VALUES, 
                        SERVICE_MONITOR_INTERVAL, DEFAULT_CONFIG, WATCHDOG_NAME, WATCHDOG_PATH,
-                       CHECK_WATCHDOG_INTERVAL)
+                       CHECK_WATCHDOG_INTERVAL, DETECTOR_PIPE_NAME)
 
 class InPurityService(win32serviceutil.ServiceFramework):
     _svc_name_ = MAIN_SERVICE_NAME
@@ -50,12 +55,14 @@ class InPurityService(win32serviceutil.ServiceFramework):
         self.log_manager = LogManager()
         self.logger = self.log_manager.get_logger('MainService', 'main_service')
         self.mitmproxy_logger = self.log_manager.get_logger('Mitmproxy', 'mitmproxy')
+        self.detector = BackendDetector(self.logger)
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.service_stop_event = win32event.CreateEvent(None, 0, 0, None)
         self.registry_paths = {
             "service_key": winreg.HKEY_LOCAL_MACHINE,
             "service_value": f"SYSTEM\\CurrentControlSet\\Services\{DAEMON_SERVICE_NAME}"
         }
+        self.gui_log_queue = Queue()
         self.stop_event = threading.Event()
         self.gui_process = None
         self.gui_pipe = None
@@ -100,7 +107,9 @@ class InPurityService(win32serviceutil.ServiceFramework):
             self.terminate_mitm_processes()
             self.start_socket()
             # 在单独线程中启动GUI和创建管道，不阻塞主服务
+            self._start_thread(self.handle_ipc_requests, "browser-scan")
             self._start_thread(self._gui_pipe_manager, "gui-pipe-manager")
+            self._start_thread(self._gui_log_sender, "gui-log-sender")
             # 启动mitmproxy代理
             self.start_mitmproxy()
             # 监听服务启动类型
@@ -127,13 +136,6 @@ class InPurityService(win32serviceutil.ServiceFramework):
                 self.logger.info(I18n.get("MITMPROXY_TERMINATED"))
                 self.stop_mitmproxy()
                 self.start_mitmproxy()
-            # 检查浏览器是否使用了单独代理
-            if self.get_upstream_enable():
-                try:
-                    upstream = self.get_upstream_server()
-                    browser_proxy.main(exclude_ports={self.get_proxy_port()}, hit_ports={int(upstream[upstream.rfind(':')+1:])})
-                except Exception as e:
-                    self.logger.exception(I18n.get("ERROR", e))
             # 每20秒检查一次，分为4次5秒的间隔，以便更快地响应停止请求
             for _ in range(4):
                 if not self.running:
@@ -197,27 +199,34 @@ class InPurityService(win32serviceutil.ServiceFramework):
         此函数在单独的线程中运行，负责启动GUI程序并建立管道连接
         如果失败，会定期重试，但不会阻塞主服务功能
         """
-        while not self.stop_event.is_set() and (self.gui_process is None or self.gui_pipe is None):
+        while not self.stop_event.is_set():
             try:
                 # 启动GUI进程
                 if self.gui_process is None or not self.gui_process.is_running():
+                    if self.gui_pipe is not None:
+                        try:
+                            win32file.CloseHandle(self.gui_pipe)
+                        except Exception:
+                            pass
+                        self.gui_pipe = None
                     self.gui_process = self.launch_gui_process(GUI_PATH)
+                    if self.gui_process is None:
+                        time.sleep(5)
+                        continue
                 
                 if self.gui_process is not None and self.gui_pipe is None:
                     try:
                         self.gui_pipe = win32file.CreateFile(
                             GUI_PIPE_NAME,
                             win32file.GENERIC_WRITE,
-                            0,
-                            None,
+                            0, None,
                             win32file.OPEN_EXISTING,
-                            0,
-                            None
+                            0, None
                         )
                         self.logger.info(I18n.get("PIPE_CREATED"))
                         # 成功连接，发送初始消息
-                        self._send_to_gui(I18n.get("SERVICE_CONNECTED_TO_GUI"))
-                        return  # 成功连接，退出函数
+                        self.gui_log_queue.put(I18n.get("SERVICE_CONNECTED_TO_GUI"))
+                        # return  # 成功连接，退出函数
                     except Exception as e:
                         if isinstance(e, win32file.error) and e.args[0] == 2:  # 文件未找到
                             self.logger.info(I18n.get("WAITING_FOR_PIPE"))
@@ -226,9 +235,8 @@ class InPurityService(win32serviceutil.ServiceFramework):
                 
             except Exception as e:
                 self.logger.exception(I18n.get("GUI_PIPE_ERROR", str(e)))
-
-            if self.gui_process is None or self.gui_pipe is None:
-                time.sleep(5)
+            # if self.gui_process is None or self.gui_pipe is None:
+            time.sleep(5)
 
     def launch_gui_process(self, exe_path):
         """
@@ -332,6 +340,8 @@ class InPurityService(win32serviceutil.ServiceFramework):
             else:
                 self.logger.info(I18n.get("NO_USER_CONTEXT"))
                 return None
+        except psutil.NoSuchProcess:
+            return None
         except Exception as e:
             self.logger.exception(I18n.get("FAILED_LAUNCH", e))
             return None
@@ -371,6 +381,18 @@ class InPurityService(win32serviceutil.ServiceFramework):
             self.logger.exception(I18n.get("FAILED_USER_CONTEXT", e))
             return None
 
+    def _gui_log_sender(self):
+        while not self.stop_event.is_set():
+            try:
+                # 从队列中获取消息，可以设置超时
+                message = self.gui_log_queue.get(timeout=1)
+                self._send_to_gui(message)
+                self.gui_log_queue.task_done()
+            except queue.Empty:
+                continue # 队列为空，继续循环
+            except Exception as e:
+                self.logger.exception(f"GUI log sender error: {e}")
+    
     def _send_to_gui(self, message):
         """
         向GUI发送消息的安全方法
@@ -386,13 +408,77 @@ class InPurityService(win32serviceutil.ServiceFramework):
             message_bytes = message.encode() if isinstance(message, str) else message
             win32file.WriteFile(self.gui_pipe, message_bytes)
         except Exception as e:
-            if e.args()[0] != 232:
+            if isinstance(e, pywintypes.error) and e.args[0] == 232:
+                pass
+            else:
                 self.logger.exception(I18n.get("GUI_PIPE_WRITE_ERROR", str(e)))
             # 关闭失败的管道
             win32file.CloseHandle(self.gui_pipe)
             self.gui_pipe = None
             if not self.gui_process.is_running():
                 self.gui_process = None
+
+    def handle_ipc_requests(self):
+        """处理来自GUI的IPC请求。"""
+        # --- 创建一个允许所有用户访问的安全描述符 ---
+        # 1. 创建一个空的 Security Descriptor
+        sd = win32security.SECURITY_DESCRIPTOR()
+        # 2. 设置一个空的 Discretionary Access Control List (DACL)，表示不限制任何访问
+        # 这是一种最宽松的设置，允许 Everyone 组的用户拥有完全控制权
+        sd.SetSecurityDescriptorDacl(1, None, 0)
+        # 3. 将 Security Descriptor 包装成 SECURITY_ATTRIBUTES 对象
+        sa = win32security.SECURITY_ATTRIBUTES()
+        sa.bInheritHandle = False
+        sa.SECURITY_DESCRIPTOR = sd
+        # --- 安全描述符创建完毕 ---
+        while not self.stop_event.is_set():
+            pipe = None
+            try:
+                pipe = win32pipe.CreateNamedPipe(
+                    DETECTOR_PIPE_NAME,
+                    win32pipe.PIPE_ACCESS_DUPLEX, # 双向管道
+                    win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT,
+                    1, 65536, 65536, 0, sa # 传入创建的安全描述符
+                )
+                self.logger.info(f"IPC管道在 BroswerScanPipe 上等待连接...")
+                win32pipe.ConnectNamedPipe(pipe, None)
+                self.logger.info("IPC: GUI已连接。")
+
+                while not self.stop_event.is_set():
+                    # 读取请求
+                    hr, data = win32file.ReadFile(pipe, 65536)
+                    if hr != 0: break # 连接断开
+                    
+                    request = json.loads(data.decode('utf-8'))
+                    self.logger.info(f"IPC: 收到请求: {request.get('command')}")
+
+                    # 更新缓存
+                    if 'cache' in request:
+                        self.detector.update_cache_from_frontend(request['cache'])
+                    
+                    # 执行后台检测
+                    if request.get("command") == "SCAN":
+                        try:
+                            port = request.get("port")
+                            candidates = self.detector.get_candidate_processes(port)
+                            response = json.dumps({"status": "ok", "candidates": candidates})
+                        except Exception as e:
+                            self.logger.error(f"IPC: 处理扫描请求时出错: {e}", exc_info=True)
+                            response = json.dumps({"status": "error", "message": str(e)})
+                            
+                        # 发送响应
+                        win32file.WriteFile(pipe, response.encode('utf-8'))
+            
+            except Exception as e:
+                if e.args[0] == 109 or e.args[0] == 232: # 管道已结束/管道正在关闭
+                    pass
+                else:
+                    self.logger.error(f"IPC管道服务器出错: {e}", exc_info=True)
+                time.sleep(5) # 出错后等待
+            finally:
+                if pipe:
+                    win32pipe.DisconnectNamedPipe(pipe)
+                    win32file.CloseHandle(pipe)
 
     def _start_thread(self, target, name, args=(), daemon=True):
         """
@@ -758,7 +844,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
                     if line:
                         message = line.strip()
                         logger.info(message)
-                        self._send_to_gui(message)
+                        self.gui_log_queue.put(message) # 放入队列，这是一个非阻塞或快速的操作
             # 创建并启动读取输出的线程
             self.proxy_stop_event = threading.Event()
             self.stdout_thread = self._start_thread(

@@ -155,6 +155,11 @@ class LogManager:
                             shutil.move(file_path, archive_date_dir)
                             self.rotate_dict.pop(script_name)
                             self.logger.info(I18n.get("move_file", file_path, archive_date_dir))
+                        except OSError as e:
+                            if isinstance(e, PermissionError) or (hasattr(e, 'winerror') and e.winerror == 32):
+                                self.rotate_dict.pop(script_name)
+                            else:
+                                self.logger.exception(I18n.get("move_file_error", str(e)))
                         except Exception as e:
                             self.logger.exception(I18n.get("move_file_error", str(e)))
         except Exception as e:

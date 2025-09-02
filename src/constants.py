@@ -123,6 +123,7 @@ VIDEO_SIGN = {
 # 服务通信相关常量
 SERVICE_HOST = '127.0.0.1'
 GUI_PIPE_NAME = r"\\.\pipe\GUIPipe"
+DETECTOR_PIPE_NAME = r"\\.\pipe\BroswerScanPipe"
 RANDOM_PORT_MIN = 49152
 RANDOM_PORT_MAX = 65535
 DEFAULT_THREAD_TIMEOUT = 5  # 线程停止的默认超时时间（秒）
