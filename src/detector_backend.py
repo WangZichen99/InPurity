@@ -51,7 +51,6 @@ class BackendDetector:
             self._log(f"[错误] 更新缓存失败: {e}")
 
     def _get_process_modules(self, p: psutil.Process) -> Optional[Set[str]]:
-        # ... (与之前版本相同)
         exe_path = None
         try:
             exe_path = p.exe()
@@ -72,7 +71,6 @@ class BackendDetector:
 
     @staticmethod
     def _find_root_process(p: psutil.Process) -> Optional[psutil.Process]:
-        # ... (与之前版本相同)
         current_proc = p
         try:
             exe_path = current_proc.exe()
@@ -97,7 +95,22 @@ class BackendDetector:
             self._log("错误：需要管理员权限才能获取所有网络连接。")
             return []
 
-        initial_pids = {c.pid for c in connections if c.raddr and c.status == 'ESTABLISHED' and c.raddr.ip in ("127.0.0.1", "::1") and c.raddr.port == port and c.pid}
+        # 扩展本地IP地址的检查范围
+        local_addresses = {"127.0.0.1", "::1", "localhost"}
+        
+        # 获取本机所有网络接口的IP地址
+        try:
+            import socket
+            hostname = socket.gethostname()
+            local_addresses.add(socket.gethostbyname(hostname))
+            # 添加主机名解析的所有IP地址
+            addr_info = socket.getaddrinfo(hostname, None)
+            for info in addr_info:
+                local_addresses.add(info[4][0])
+        except Exception:
+            pass  # 忽略获取本机IP时的错误
+
+        initial_pids = {c.pid for c in connections if c.raddr and c.status == 'ESTABLISHED' and c.raddr.ip in local_addresses and c.raddr.port == port and c.pid}
 
         if not initial_pids:
             self._log(f"[检测] 未发现任何进程连接到端口 {port}。")
