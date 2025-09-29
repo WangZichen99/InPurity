@@ -440,9 +440,9 @@ class InPurityService(win32serviceutil.ServiceFramework):
                     win32pipe.PIPE_TYPE_MESSAGE | win32pipe.PIPE_READMODE_MESSAGE | win32pipe.PIPE_WAIT,
                     1, 65536, 65536, 0, sa # 传入创建的安全描述符
                 )
-                self.logger.info(f"IPC管道在 BroswerScanPipe 上等待连接...")
+                # self.logger.info(f"IPC管道在 BroswerScanPipe 上等待连接...")
                 win32pipe.ConnectNamedPipe(pipe, None)
-                self.logger.info("IPC: GUI已连接。")
+                # self.logger.info("IPC: GUI已连接。")
 
                 while not self.stop_event.is_set():
                     # 读取请求
@@ -450,7 +450,7 @@ class InPurityService(win32serviceutil.ServiceFramework):
                     if hr != 0: break # 连接断开
                     
                     request = json.loads(data.decode('utf-8'))
-                    self.logger.info(f"IPC: 收到请求: {request.get('command')}")
+                    # self.logger.info(f"IPC: 收到请求: {request.get('command')}")
 
                     # 更新缓存
                     if 'cache' in request:

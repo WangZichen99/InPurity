@@ -232,7 +232,11 @@ class InPurityProxy:
             title_tag = soup.find('title')
             if title_tag:
                 title_text = title_tag.get_text(strip=True)
-                self.logger.info(f"page title: {title_text}")
+                # 处理可能的编码问题，确保标题可以被安全记录
+                safe_title = title_text.encode('utf-8', errors='ignore').decode('utf-8')
+                # 移除或替换可能导致编码问题的字符
+                safe_title = safe_title.replace('\xa0', ' ').replace('\u00a0', ' ')
+                self.logger.info(f"page title: {safe_title}")
                 # 检查中英文敏感词
                 english_word_pattern = re.compile(r'[a-zA-Z0-9]+')
                 english_term = english_word_pattern.findall(title_text)
@@ -441,9 +445,6 @@ class InPurityProxy:
         
         # 清理过期的禁止事件
         self.forbid_manager.clear_expired_events()
-
-        # 清理拦截搜索词
-        self.blocked_words.clear()
         
         self.logger.info(I18n.get("RESET_FORBID", mode))
 

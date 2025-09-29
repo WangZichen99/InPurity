@@ -144,7 +144,7 @@ class ProxyGUI:
         value = self.db.get_config("upstream_server")
         port = int(value[value.rindex(":") + 1 : ])
 
-        self.logger.info("="*20 + " 向服务发送扫描请求 " + "="*20)
+        # self.logger.info("="*20 + " 向服务发送扫描请求 " + "="*20)
         pipe = None
         try:
             # 1. 连接到服务创建的管道
@@ -170,11 +170,12 @@ class ProxyGUI:
             response_str = data.decode('utf-8')
             response = json.loads(response_str)
             
-            self.logger.info(f"从服务收到响应: {response}")
-            
             if response.get("status") == "ok":
                 candidates = response.get("candidates", [])
-                
+
+                if len(candidates) > 0:
+                    self.logger.info(f"从服务收到响应: {response}")
+
                 # 4. 清空上次的缓存结果，准备用本次结果填充
                 newly_confirmed_browsers = []
                 newly_confirmed_non_browsers = []
